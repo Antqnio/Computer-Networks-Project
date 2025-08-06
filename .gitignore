@@ -1,0 +1,25 @@
+# Ignora file oggetto
+*.o
+
+# Ignora eseguibili (file senza estensione)e
+client
+server
+
+# Ma NON ignorare file con estensioni conosciute
+!*.c
+!*.h
+!*.md
+!*.txt
+!*.gitignore
+!Makefile
+
+# Ignora directory di build
+/build/
+/bin/
+/out/
+
+# File temporanei o backup dell'editor
+*~
+*.swp
+*.tmp
+.DS_Store
