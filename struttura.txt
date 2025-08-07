@@ -1,0 +1,17 @@
+.
+├── client
+├── client.c
+├── docs
+│   └── progetto_reti_informatiche_24-25.pdf
+├── include
+│   ├── constants.h
+│   └── stampa_delimitatore.h
+├── quiz
+│   └── themes.txt
+├── server
+├── server.c
+├── src
+│   └── stampa_delimitatore.c
+└── struttura.txt
+
+5 directories, 10 files

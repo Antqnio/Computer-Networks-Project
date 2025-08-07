@@ -2,6 +2,7 @@
     "files.associations": {
         "string.h": "c",
         "inet.h": "c",
-        "stampa_delimitatore.h": "c"
+        "stampa_delimitatore.h": "c",
+        "constants.h": "c"
     }
 }
