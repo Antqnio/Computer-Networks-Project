@@ -7,8 +7,9 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-#include "include/constants.h"
+#include "include/costanti.h"
 #include "include/stampa_delimitatore.h"
+#include "include/comandi.h"
 
 #define PORTA 4242
 #define BACKLOG_SIZE 10
@@ -18,24 +19,32 @@
 struct Giocatore {
     int socket;
     char nickname[NICKNAME_MAX_LENGTH];
-    struct Giocatore* next; // Puntatore al prossimo giocatore nella lista
+    struct Giocatore* left; // Puntatore al prossimo giocatore nell'albero binario di ricerca.
+    struct Giocatore* right; // Puntatore al prossimo giocatore nell'albero binario di ricerca.
 };
 
-struct Giocatore* lista_giocatori = NULL; // Lista dei giocatori connessi
+struct Giocatore* albero_giocatori = NULL; // Lista dei giocatori connessi
 
 
 const char QUIZ_DISPONIBILI[NUMERO_QUIZ][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Scienze", "Arte"};
 
-int ottieni_partecipanti() {
+int ottieni_partecipanti(struct Giocatore* curr) {
     // Funzione per ottenere il numero di partecipanti
-    int count = 0;
-    struct Giocatore* curr;
-    for (curr = lista_giocatori; curr != NULL; curr = curr->next) {
-        count++;
+    if (curr == NULL) {
+        return 0; // Se la lista è vuota, ritorna 0
     }
-    return count;
+    return 1 + ottieni_partecipanti(curr->left) + ottieni_partecipanti(curr->right);
 }
 
+void stampa_partecipanti(struct Giocatore* curr) {
+    // Funzione per stampare i partecipanti in ordine alfabetico (visita inorder)
+    if (curr == NULL) {
+        return; // Se la lista è vuota, ritorna
+    }
+    stampa_partecipanti(curr->left); // Stampa il sottoalbero sinistro
+    printf("- %s\n", curr->nickname);
+    stampa_partecipanti(curr->right); // Stampa il sottoalbero destro
+}
 
 void stampa_interfaccia() {
     stampa_delimitatore();
@@ -46,41 +55,64 @@ void stampa_interfaccia() {
     stampa_delimitatore();
     printf("\n");
 
-    printf("Partecipanti (%d):\n", ottieni_partecipanti());
-    for (struct Giocatore* curr = lista_giocatori; curr != NULL; curr = curr->next) {
-        printf("- %s\n", curr->nickname);
-    }
+    printf("Partecipanti (%d):\n", ottieni_partecipanti(albero_giocatori));
+    stampa_partecipanti(albero_giocatori); // Funzione per stampare i partecipanti
     printf("\n\n");
     printf("------\n");
 }
 
-void inserisci_giocatore(struct Giocatore nuovoGiocatore) {
-    // Funzione per aggiungere un giocatore alla lista dei giocatori
-    if (lista_giocatori == NULL) {
-        // Se la lista è vuota, inizializza la lista con il nuovo giocatore
-        lista_giocatori = malloc(sizeof(struct Giocatore));
-        *lista_giocatori = nuovoGiocatore;
-    } else {
-        // Aggiungi il nuovo giocatore alla fine della lista
-        struct Giocatore* curr;
-        for (curr = lista_giocatori; curr->next != NULL; curr = curr->next) {
-            // Trova l'ultimo giocatore
+void inserisci_giocatore_ricorsivo(struct Giocatore* curr, struct Giocatore nuovoGiocatore) {
+    // Funzione ricorsiva per inserire un giocatore nell'albero binario di ricerca
+    if (strcmp(nuovoGiocatore.nickname, curr->nickname) < 0) {
+        // Se il nuovo giocatore è "minore" del corrente, va a sinistra
+        if (curr->left == NULL) {
+            curr->left = malloc(sizeof(struct Giocatore));
+            *curr->left = nuovoGiocatore;
+            curr->left->left = NULL;
+            curr->left->right = NULL;
+        } else {
+            inserisci_giocatore_ricorsivo(curr->left, nuovoGiocatore);
         }
-        curr->next = malloc(sizeof(struct Giocatore));
-        *curr->next = nuovoGiocatore;
-        curr->next->next = NULL;
+    } else {
+        // Altrimenti va a destra
+        if (curr->right == NULL) {
+            curr->right = malloc(sizeof(struct Giocatore));
+            *curr->right = nuovoGiocatore;
+            curr->right->left = NULL;
+            curr->right->right = NULL;
+        } else {
+            inserisci_giocatore_ricorsivo(curr->right, nuovoGiocatore);
+        }
     }
 }
 
-int nickname_gia_registrato(const char* nickname) {
-    // Funzione per verificare se il nickname è già registrato
-    struct Giocatore* curr;
-    for (curr = lista_giocatori; curr != NULL; curr = curr->next) {
-        if (strcmp(curr->nickname, nickname) == 0) {
-            return 1; // Il nickname è già registrato
-        }
+void inserisci_giocatore(struct Giocatore nuovoGiocatore) {
+    // Funzione per aggiungere un giocatore alla lista dei giocatori
+    if (albero_giocatori == NULL) {
+        // Se l'albero è vuoto, inizializza l'albero con il nuovo giocatore
+        albero_giocatori = malloc(sizeof(struct Giocatore));
+        *albero_giocatori = nuovoGiocatore;
+    } else {
+        // Altrimenti, inserisci il nuovo giocatore nell'albero in ordine alfabetico di nickname
+        inserisci_giocatore_ricorsivo(albero_giocatori, nuovoGiocatore);
     }
-    return 0; // Il nickname non è registrato
+}
+
+int nickname_gia_registrato(const char* nickname, struct Giocatore* curr) {
+    // Funzione per verificare se il nickname è già registrato
+    if (curr == NULL) {
+        return 0; // Se l'albero è vuoto, il nickname non è registrato
+    }
+    if (strcmp(curr->nickname, nickname) == 0) {
+        return 1; // Il nickname è già registrato
+    }
+    else if (strcmp(nickname, curr->nickname) < 0) {
+        // Se il nickname è "minore", cerca nel sottoalbero sinistro
+        return nickname_gia_registrato(nickname, curr->left);
+    } else {
+        // Altrimenti cerca nel sottoalbero destro
+        return nickname_gia_registrato(nickname, curr->right);
+    }
 }
 
 void invia_stato_nickname(int client_socket, uint32_t stato_del_nickname) {
@@ -120,7 +152,7 @@ struct Giocatore crea_giocatore(int cl_sd) {
             printf("Lunghezza nickname: %d\n", lunghezza_nickname);
         }
         // Controlla se il nickname è valido
-        if (strlen(nickname) == 0 || strlen(nickname) >= NICKNAME_MAX_LENGTH || nickname_gia_registrato(nickname)) {
+        if (strlen(nickname) == 0 || strlen(nickname) >= NICKNAME_MAX_LENGTH || nickname_gia_registrato(nickname, albero_giocatori)) {
             printf("Nickname errato o già registrato: %s\n", nickname);
             // Invia un messaggio di errore al client, così può riprovare a inviare un nickname valido
             stato_del_nickname = NICKNAME_ERRATO;
@@ -138,6 +170,8 @@ struct Giocatore crea_giocatore(int cl_sd) {
     nuovoGiocatore.socket = cl_sd;
     memset(nuovoGiocatore.nickname, 0, sizeof(nuovoGiocatore.nickname)); // Pulizia del campo nickname
     strcpy(nuovoGiocatore.nickname, nickname); // Copia il nickname nel nuovo giocatore
+    nuovoGiocatore.left  = NULL;
+    nuovoGiocatore.right = NULL;
     inserisci_giocatore(nuovoGiocatore); // Aggiungi il nuovo giocatore alla lista dei giocatori
     return nuovoGiocatore;
 
@@ -165,15 +199,30 @@ void invia_quiz_disponibili(int client_socket, struct Giocatore giocatore) {
     }
     // Prima di inviare i temi, calcolo la lunghezza del buffer e la converto in formato di rete,
     // per poi inviarla al client.
+    send(client_socket, (void*)&dim, sizeof(dim), 0); // Invio la dimensione del buffer
+    // Ora invio il buffer contenente i temi
     send(client_socket, (void*)buffer, dim, 0);
 }
 
 void* gestisci_connessione(void* arg) {
     int cl_sd = *(int*)arg;
+    int ret;
+    char messaggio = 0; // Variabile per gestire i messaggi ricevuti dal client
     struct Giocatore giocatore = crea_giocatore(cl_sd);
     stampa_interfaccia(); // Stampa l'interfaccia grafica del server
     invia_quiz_disponibili(cl_sd, giocatore); // Funzione per inviare i quiz disponibili al giocatore
-    
+    while ((ret = recv(cl_sd, (void*)&messaggio, sizeof(messaggio), 0) > 0)) {
+        // Il server rimane in attesa di ricevere dati dal client.
+        // In un'applicazione reale, qui si gestirebbero le richieste del client.
+        // Per ora, il server non fa nulla e continua a gestire la connessione.
+        
+    }
+    if (ret == -1) {
+        perror("Errore nella ricezione dei dati dal client");
+    } else /* if (ret == 0) */ {
+        printf("Il client %s si è disconnesso.\n", giocatore.nickname);
+    }
+
     close(cl_sd);
     pthread_exit(NULL); // Termina il thread
 }

@@ -6,7 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "include/constants.h"
+#include "include/costanti.h"
+#include "include/comandi.h"
 #include "include/stampa_delimitatore.h"
 
 void termina_con_errore(int sd, const char* msg) {
@@ -16,6 +17,19 @@ void termina_con_errore(int sd, const char* msg) {
     exit(EXIT_FAILURE);
 }
 
+char scelta_numerica(int min, int max) {
+    // Funzione per leggere una scelta numerica da tastiera
+    // Uso un char perché un byte è sufficiente per le scelte del menu
+    int scelta;
+    while (scanf("%d", &scelta) == -1 || scelta < min || scelta > max) { // Controlla se la scelta è valida
+        // Se scanf fallisce (per esempio, se provo a inserire un char da tastiera) o la scelta non è valida, stampa un messaggio di erro
+        printf("Scelta non valida, riprova:\n");
+        scanf("%d", &scelta);
+        // Pulisco il buffer dell'input
+        while (getchar() != '\n'); // leggo e scarto tutto fino a fine riga
+    }
+    return (char)scelta; // Ritorna la scelta valida
+}
 
 int mostra_menu_iniziale() {
     int scelta;
@@ -26,13 +40,7 @@ int mostra_menu_iniziale() {
     printf("2 - Esci\n");
     stampa_delimitatore();
     printf("La tua scelta:\n");
-    while (scanf("%d", &scelta) == -1 || scelta < 1 || scelta > 2) { // Controlla se la scelta è valida
-        // Se scanf fallisce (per esempio, se provo a inserire un char da tastiera) o la scelta non è valida, stampa un messaggio di erro
-        printf("Scelta non valida, riprova:\n");
-        scanf("%d", &scelta);
-        // Pulisco il buffer dell'input
-        while (getchar() != '\n'); // leggo e scarto tutto fino a fine riga
-    }
+    scelta = scelta_numerica(1, 2);
     return scelta;
 }
 
@@ -57,7 +65,7 @@ void mostra_menu_nickname(char *nickname, size_t size) {
             */
         snprintf(format, sizeof(format), "%%%zus", size - 1);
         scanf(format, nickname); // Legge il nickname
-        printf("Nickname inserito: %s\n", nickname);
+        //printf("Nickname inserito: %s\n", nickname);
         if (strlen(nickname) == 0) {
             printf("Nickname non valido, riprova:\n");
         }
@@ -65,12 +73,30 @@ void mostra_menu_nickname(char *nickname, size_t size) {
     }
 }
 
+void stampa_menu_temi(const char* temi, int numero_di_temi) {
+    printf("Quiz disponibili:\n");
+    stampa_delimitatore();
+    // Stampa i temi separati da '\n'
+    const char* start = temi;
+    const char* end = strchr(start, '\n'); // Trova il primo '\n'
+    int i = 1;
+    while (end != NULL && i <= numero_di_temi) {
+        printf("%d - %.*s\n", i, (int)(end - start), start);
+        start = end + 1; // Passa al prossimo tema
+        end = strchr(start, '\n'); // Trova il prossimo '\n'
+        i++;
+    }
+    stampa_delimitatore();
+}
+
+
 int main (int argc, char *argv[]) {
-    int scelta;
+    char scelta; // Variabile per la scelta del menu iniziale e del tema di gioco
     int porta;
     char nickname[NICKNAME_MAX_LENGTH];
+    char temi[1024]; // Buffer per i temi
     int ret, sd;
-    size_t dim;
+    size_t dim, byte_ricevuti;
     uint32_t lunghezza_nickname; // Lunghezza del nickname da inviare al server
     uint32_t lunghezza_nickname_net; // Lunghezza nickname in network order
     struct sockaddr_in sv_addr; // Struttura per il server
@@ -116,11 +142,11 @@ int main (int argc, char *argv[]) {
         // Inserimento del nickname (sarà troncato se supera la lunghezza massima, quindi sarà semppre valido)
         mostra_menu_nickname(nickname, sizeof(nickname));
         // Invia la lunghezza del nickname al server
-        printf("Nickname da inviare: %s\n", nickname);
+        // printf("Nickname da inviare: %s\n", nickname);
         lunghezza_nickname = strlen(nickname); // Invio al server la quantita di dati
-        printf("Lunghezza nickname: %u\n", lunghezza_nickname);
+        // printf("Lunghezza nickname: %u\n", lunghezza_nickname);
         lunghezza_nickname_net = htonl(lunghezza_nickname); // Converto in formato network
-        printf("Lunghezza nickname da inviare: %u\n", lunghezza_nickname_net);
+        // printf("Lunghezza nickname da inviare: %u\n", lunghezza_nickname_net);
 
         // Invia la lunghezza del nickname (quindi quanti byte il server si aspetta)
         dim = sizeof(lunghezza_nickname_net);
@@ -147,7 +173,7 @@ int main (int argc, char *argv[]) {
             printf("Nickname già registrato: per favore, prova a usarne un altro\n");
         }
     }
-
+    printf("\n");
     // Adesso ricevo prima il numero di temi, poi i titoli dei vari temi.
     dim = sizeof(numero_di_temi);
     ret = recv(sd, (void*)&numero_di_temi, dim, 0);
@@ -155,7 +181,33 @@ int main (int argc, char *argv[]) {
         termina_con_errore(sd, "Errore nelle ricezione del numero di quiz");
     }
     numero_di_temi = ntohl(numero_di_temi); // Converto in formato host
-    printf("Numero di temi disponibili: %u\n", numero_di_temi);
-
-    
+    //printf("Numero di temi disponibili: %u\n", numero_di_temi);
+    // Ora ricevo la lunghezza del buffer che contiene i temi
+    ret = recv(sd, (void*)&dim, sizeof(dim), 0);
+    if (ret == -1) {
+        termina_con_errore(sd, "Errore nelle ricezione della lunghezza del buffer dei temi");
+    }
+    // Ora ricevo i temi come una stringa unica, separati da '\n'.
+    memset(temi, 0, sizeof(temi)); // Inizializzo il buffer dei temi
+    byte_ricevuti = 0; // Inizializzo il contatore dei byte ricevuti
+    while (byte_ricevuti < dim) {
+        ret = recv(sd, temi + byte_ricevuti, dim - byte_ricevuti, 0);
+        if (ret <= 0) {
+            termina_con_errore(sd, "Errore nella ricezione dei temi");
+        }
+        byte_ricevuti += ret;
+    }
+    // A questo punto, temi contiene tutti i titoli dei temi, separati da '\n'.
+    while(1) {
+        stampa_menu_temi(temi, numero_di_temi); // Stampa il menu dei temi
+        printf("La tua scelta: ");
+        scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
+        // Invia la scelta del tema al server
+        scelta = htonl(scelta); // Converto in formato network
+        ret = send(sd, (void*)&scelta, sizeof(scelta), 0);
+        if (ret == -1) {
+            termina_con_errore(sd, "Errore nell'invio della scelta del tema al server");
+        }
+        // Ora il client può iniziare a giocare con il tema scelto.
+    }
 }
