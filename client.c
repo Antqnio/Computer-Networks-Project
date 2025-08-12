@@ -88,6 +88,32 @@ void stampa_menu_temi(const char* temi, int numero_di_temi) {
     stampa_delimitatore();
 }
 
+void ottieni_tema_scelto(const char* temi, uint8_t scelta, char* tema_scelto, size_t size) {
+    // Scorri la stringa fino al (scelta-1)-esimo '\n'
+    const char* start = temi;
+    for (int i = 1; i < scelta; ++i) {
+        start = strchr(start, '\n');
+        if (!start) {
+            fprintf(stderr, "Tema scelto non trovato\n");
+            tema_scelto[0] = '\0';
+            return;
+        }
+        start++; // Vai al carattere dopo '\n'
+    }
+    const char* end = strchr(start, '\n');
+    if (!end) {
+        // Se non c'è un altro '\n', prendi fino alla fine della stringa
+        end = temi + strlen(temi);
+    }
+    size_t length = end - start;
+    if (length >= size) {
+        length = size - 1;
+    }
+    strncpy(tema_scelto, start, length);
+    tema_scelto[length] = '\0';
+}
+
+
 void gestisci_ritorno_recv_send_lato_client(int ret, int sd, const char* msg) {
     // Funzione per gestire il ritorno di recv lato client
     if (ret <= 0) {
@@ -258,6 +284,7 @@ int main (int argc, char *argv[]) {
         // Ora scelgo un tema e lo invio al server.
         while(1) {
             uint8_t ack;
+            char tema_scelto[1024]; // Buffer per il tema scelto
             stampa_menu_temi(temi, numero_di_temi); // Stampa il menu dei temi
             printf("La tua scelta: ");
             scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
@@ -276,7 +303,10 @@ int main (int argc, char *argv[]) {
                 stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
                 break;
             }
+            ottieni_tema_scelto(temi, scelta, tema_scelto, sizeof(tema_scelto)); // Ottieni il tema scelto
             // Ora il client può iniziare a giocare con il tema scelto.
+            snprintf("Quiz -  %s\n", temi + (scelta - 1) * 100); // Stampa il tema scelto
+            printf("Quiz - %s\n", temi + );
             while(1) {
                 // Qui dovrebbe esserci la logica del gioco, ma per ora ci limitiamo a stampare un messaggio
                 printf("Hai scelto il tema: %s\n", QUIZ_DISPONIBILI[scelta - 1]);

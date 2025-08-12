@@ -150,7 +150,7 @@ struct Giocatore crea_giocatore(int cl_sd) {
         // Ricevi la lunghezza del nickname
         uint32_t lunghezza_nickname = 0, byte_ricevuti = 0;
         uint8_t ack;
-        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_lato_server, "Errore nella ricezione della lunghezza del nickname");
+        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della lunghezza del nickname");
         // printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
         lunghezza_nickname = ntohl(lunghezza_nickname); // Converto in formato host
         // Ricevi il nickname dal client
@@ -162,7 +162,7 @@ struct Giocatore crea_giocatore(int cl_sd) {
         // Lunghezza valida: informo il client che può inviare il nickname
         invia_ack(cl_sd, 1); // Invia un ACK positivo al client
         // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
-        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_lato_server, "Errore nella ricezione del nickname");
+        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione del nickname");
         // Controlla se il nickname è valido
         if (nickname_gia_registrato(nickname, albero_giocatori)) {
             // printf("Nickname errato o già registrato: %s\n", nickname);
