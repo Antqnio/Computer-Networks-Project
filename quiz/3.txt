@@ -1,0 +1,5 @@
+Quanti mondiali di calcio ha vinto l'Italia? 4 | quattro
+Quanti europei di calcio ha vinto l'Italia? 2 | due
+Quante Coppe dei Campioni ha vinto il Milan? 7 | sette
+Quante Coppe dei Campioni ha vinto l'Inter? 3 | tre
+Quante Coppe dei Campioni ha vinto la Juventus? 2 | due

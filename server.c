@@ -10,6 +10,8 @@
 #include "include/costanti.h"
 #include "include/stampa_delimitatore.h"
 #include "include/comandi.h"
+#include "include/send_recv_all.h"
+
 
 #define PORTA 4242
 #define BACKLOG_SIZE 10
@@ -26,7 +28,7 @@ struct Giocatore {
 struct Giocatore* albero_giocatori = NULL; // Lista dei giocatori connessi
 
 
-const char QUIZ_DISPONIBILI[NUMERO_QUIZ][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Scienze", "Arte"};
+const char QUIZ_DISPONIBILI[NUMERO_QUIZ][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Cinema", "Arte"};
 
 int ottieni_partecipanti(struct Giocatore* curr) {
     // Funzione per ottenere il numero di partecipanti
@@ -115,54 +117,64 @@ int nickname_gia_registrato(const char* nickname, struct Giocatore* curr) {
     }
 }
 
-void invia_stato_nickname(int client_socket, uint32_t stato_del_nickname) {
-    uint32_t stato_del_nickname_net = htonl(stato_del_nickname); // Converto in formato di rete
-    // Invia un messaggio di conferma al client
-    send(client_socket, (void*)&stato_del_nickname_net, sizeof(stato_del_nickname_net), 0);
+void gestisci_ritorno_recv_send_lato_server(int ret, int sd, const char* msg) {
+    // Funzione per gestire il ritorno di recv
+    if (ret <= 0) {
+        if (ret == 0) {
+            printf("Socket lato client chiuso.\n");
+        } else {
+            perror(msg);
+        }
+        // Chiudo il socket associato al client sia nel caso di errore che di chiusura
+        close(sd);
+        pthread_exit(NULL); // Termina il thread
+    }
+}
+
+void invia_ack(int sd, uint8_t ack) {
+    // Funzione per inviare un ACK al client
+    ssize_t ret = send(sd, &ack, sizeof(ack), 0);
+    if (ret <= 0) {
+        perror("Errore nell'invio dell'ACK al client");
+        close(sd);
+        pthread_exit(NULL); // Termina il thread
+    }
 }
 
 struct Giocatore crea_giocatore(int cl_sd) {
     char nickname[NICKNAME_MAX_LENGTH];
     uint32_t stato_del_nickname = 0;
-    memset(nickname, 0, sizeof(nickname)); // Inizializza il nickname
     // Ricevi il nickname dal client
     while (stato_del_nickname == NICKNAME_ERRATO) {
+        memset(nickname, 0, sizeof(nickname)); // Inizializza il nickname
         // Ricevi la lunghezza del nickname
-        int lunghezza_nickname = 0, byte_ricevuti = 0;
-        int ret = recv(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), 0);
-        printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
-        if (ret <= 0) {
-            perror("Errore nella ricezione della lunghezza del nickname");
-            close(cl_sd);
-            pthread_exit(NULL); // Termina il thread
-        }
-        // Ricevi il nickname dal client
-        // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
+        uint32_t lunghezza_nickname = 0, byte_ricevuti = 0;
+        uint8_t ack;
+        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_lato_server, "Errore nella ricezione della lunghezza del nickname");
+        // printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
         lunghezza_nickname = ntohl(lunghezza_nickname); // Converto in formato host
-        printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
-        while(byte_ricevuti < lunghezza_nickname) {
-            int ret = recv(cl_sd, nickname + byte_ricevuti, lunghezza_nickname - byte_ricevuti, 0);
-            if (ret <= 0) {
-                perror("Errore nella ricezione del nickname");
-                close(cl_sd);
-                pthread_exit(NULL); // Termina il thread
-            }
-            byte_ricevuti += ret;
-            printf("Ricevuti %d byte del nickname: %s\n", byte_ricevuti, nickname);
-            printf("Lunghezza nickname: %d\n", lunghezza_nickname);
+        // Ricevi il nickname dal client
+        if (lunghezza_nickname == 0 || lunghezza_nickname >= NICKNAME_MAX_LENGTH) {
+            // Se la lunghezza del nickname è 0 o troppo lunga, gestisci l'errore
+            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
+            continue;
         }
+        // Lunghezza valida: informo il client che può inviare il nickname
+        invia_ack(cl_sd, 1); // Invia un ACK positivo al client
+        // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
+        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_lato_server, "Errore nella ricezione del nickname");
         // Controlla se il nickname è valido
-        if (strlen(nickname) == 0 || strlen(nickname) >= NICKNAME_MAX_LENGTH || nickname_gia_registrato(nickname, albero_giocatori)) {
-            printf("Nickname errato o già registrato: %s\n", nickname);
+        if (nickname_gia_registrato(nickname, albero_giocatori)) {
+            // printf("Nickname errato o già registrato: %s\n", nickname);
             // Invia un messaggio di errore al client, così può riprovare a inviare un nickname valido
-            stato_del_nickname = NICKNAME_ERRATO;
-            invia_stato_nickname(cl_sd, NICKNAME_ERRATO);
-            memset(nickname, 0, sizeof(nickname)); // Resetta il nickname
+            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
+            continue;
         }
         else {
-            printf("Nickname valido: %s\n", nickname);
+            // printf("Nickname valido: %s\n", nickname);
             stato_del_nickname = NICKNAME_VALIDO;
-            invia_stato_nickname(cl_sd, NICKNAME_VALIDO);
+            invia_ack(cl_sd, 1); // Invia un ACK positivo al client
+            continue;
         }
     }
     // Se siamo qui, il nickname è valido, quindi creiamo un nuovo Giocatore
@@ -177,18 +189,18 @@ struct Giocatore crea_giocatore(int cl_sd) {
 
 }
 
-void invia_quiz_disponibili(int client_socket, struct Giocatore giocatore) {
-    int ret;
+void invia_quiz_disponibili(struct Giocatore giocatore) {
+    ssize_t ret;
+    char messaggio_di_errore[256];
     // Prima invio il numero di quiz disponibili
     uint32_t numero_di_quiz_disponibili = NUMERO_QUIZ; // Numero di quiz disponibili
     uint32_t numero_di_quiz_disponibili_net = htonl(numero_di_quiz_disponibili); // Converto in formato di rete
     size_t dimensione_messaggio = sizeof(numero_di_quiz_disponibili);
-    ret = send(client_socket, (void*)&numero_di_quiz_disponibili_net, dimensione_messaggio, 0);
-    if (ret == -1) {
-        fprintf(stderr, "Errore nell'invio del numero dei quiz al client %s: ", giocatore.nickname);
-        perror(""); // Stampo solo la descrizione dell'errore
-        pthread_exit(NULL);
-    }
+    // Scrivo il messaggio di errore
+    memset(messaggio_di_errore, 0, sizeof(messaggio_di_errore));
+    snprintf(messaggio_di_errore, sizeof(messaggio_di_errore), "Errore nell'invio del numero dei quiz al client %s: ", giocatore.nickname);
+    ret = send_all(giocatore.socket, (void*)&numero_di_quiz_disponibili_net, dimensione_messaggio, gestisci_ritorno_recv_send_lato_server, messaggio_di_errore);
+
     // Ora invio i temi come una stringa unica il cui separatore è '\n'.
     size_t dim = 1024;
     char buffer[dim];
@@ -199,29 +211,47 @@ void invia_quiz_disponibili(int client_socket, struct Giocatore giocatore) {
     }
     // Prima di inviare i temi, calcolo la lunghezza del buffer e la converto in formato di rete,
     // per poi inviarla al client.
-    send(client_socket, (void*)&dim, sizeof(dim), 0); // Invio la dimensione del buffer
+    ret = send_all(giocatore.socket, (void*)&dim, sizeof(dim), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei temi al client");
+
     // Ora invio il buffer contenente i temi
-    send(client_socket, (void*)buffer, dim, 0);
+    ret = send_all(giocatore.socket, (void*)buffer, dim, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei temi al client");
+
+}
+
+char ricevi_quiz_scelto(struct Giocatore giocatore) {
+    ssize_t ret;
+    uint8_t quiz_scelto = 0;
+    while(quiz_scelto < 1 || quiz_scelto > NUMERO_QUIZ) {
+        // Ricevo il quiz scelto dal client (uso recv perhé è un uint8_t)
+        ret = recv(giocatore.socket, (void*)&quiz_scelto, sizeof(quiz_scelto), 0);
+        gestisci_ritorno_recv_send_lato_server(ret, giocatore.socket, "Errore nella ricezione del quiz scelto dal client");
+        if (quiz_scelto < 1 || quiz_scelto > NUMERO_QUIZ) {
+            invia_ack(giocatore.socket, 0); // Invia un ACK negativo al client
+        }
+        else {
+            invia_ack(giocatore.socket, 1); // Invia un ACK positivo al client
+            printf("Il client %s ha scelto il quiz: %s\n", giocatore.nickname, QUIZ_DISPONIBILI[quiz_scelto - 1]);
+        }
+    }
+    return quiz_scelto; // Ritorno il numero del quiz scelto
 }
 
 void* gestisci_connessione(void* arg) {
     int cl_sd = *(int*)arg;
     int ret;
-    char messaggio = 0; // Variabile per gestire i messaggi ricevuti dal client
+    char quiz_scelto;
+    char messaggio = 0; // Variabile per gestire i messaggi ricevuti dal client. Inizializzo a 0 per "pulizia".
     struct Giocatore giocatore = crea_giocatore(cl_sd);
     stampa_interfaccia(); // Stampa l'interfaccia grafica del server
-    invia_quiz_disponibili(cl_sd, giocatore); // Funzione per inviare i quiz disponibili al giocatore
-    while ((ret = recv(cl_sd, (void*)&messaggio, sizeof(messaggio), 0) > 0)) {
-        // Il server rimane in attesa di ricevere dati dal client.
-        // In un'applicazione reale, qui si gestirebbero le richieste del client.
-        // Per ora, il server non fa nulla e continua a gestire la connessione.
+    invia_quiz_disponibili(giocatore); // Funzione per inviare i quiz disponibili al giocatore
+    quiz_scelto = ricevi_quiz_scelto(giocatore); // Funzione per ricevere il quiz scelto dal giocatore
+    // Adesso il client può iniziare a giocare con il quiz scelto.
+    while (1) {
+        // Invio la prima domanda del quiz scelto al client
+        
         
     }
-    if (ret == -1) {
-        perror("Errore nella ricezione dei dati dal client");
-    } else /* if (ret == 0) */ {
-        printf("Il client %s si è disconnesso.\n", giocatore.nickname);
-    }
+    gestisci_ritorno_recv(ret, cl_sd, "Errore nella ricezione dei dati dal client");
 
     close(cl_sd);
     pthread_exit(NULL); // Termina il thread
@@ -244,7 +274,15 @@ int main () {
     my_addr.sin_port = htons(PORTA);
     inet_pton(AF_INET, SERVER_IP, &my_addr.sin_addr);
     ret = bind(sd, (struct sockaddr*)&my_addr, sizeof(my_addr));
+    if (ret < 0) {
+        perror("Errore nel bind");
+        exit(EXIT_FAILURE);
+    }
     ret = listen(sd, BACKLOG_SIZE);
+    if (ret < 0) {
+        perror("Errore nel listen");
+        exit(EXIT_FAILURE);
+    }
     len = sizeof(cl_addr);
     while(1) {
         cl_sd = accept(sd, (struct sockaddr*)&cl_addr, &len);
