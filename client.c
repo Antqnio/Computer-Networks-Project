@@ -92,8 +92,9 @@ void ottieni_tema_scelto(const char* temi, uint8_t scelta, char* tema_scelto, si
     // Scorri la stringa fino al (scelta-1)-esimo '\n'
     const char* start = temi;
     for (int i = 1; i < scelta; ++i) {
-        start = strchr(start, '\n');
+        start = strchr(start, '\n'); // Trova il prossimo '\n'
         if (!start) {
+            // Se non c'è un altro '\n', significa che la scelta è fuori dai temi disponibili
             fprintf(stderr, "Tema scelto non trovato\n");
             tema_scelto[0] = '\0';
             return;
@@ -102,11 +103,13 @@ void ottieni_tema_scelto(const char* temi, uint8_t scelta, char* tema_scelto, si
     }
     const char* end = strchr(start, '\n');
     if (!end) {
-        // Se non c'è un altro '\n', prendi fino alla fine della stringa
+        // Se non c'è un altro '\n', prendo i caratteri fino alla fine della stringa
         end = temi + strlen(temi);
     }
     size_t length = end - start;
     if (length >= size) {
+        // Se la lunghezza del tema scelto è maggiore della dimensione del buffer, lo tronco
+        // Questo caso non dovrebbe mai verificarsi.
         length = size - 1;
     }
     strncpy(tema_scelto, start, length);
@@ -304,14 +307,10 @@ int main (int argc, char *argv[]) {
                 break;
             }
             ottieni_tema_scelto(temi, scelta, tema_scelto, sizeof(tema_scelto)); // Ottieni il tema scelto
-            // Ora il client può iniziare a giocare con il tema scelto.
-            snprintf("Quiz -  %s\n", temi + (scelta - 1) * 100); // Stampa il tema scelto
-            printf("Quiz - %s\n", temi + );
+            printf("Quiz - %s\n", tema_scelto);
+            stampa_delimitatore();
             while(1) {
-                // Qui dovrebbe esserci la logica del gioco, ma per ora ci limitiamo a stampare un messaggio
-                printf("Hai scelto il tema: %s\n", QUIZ_DISPONIBILI[scelta - 1]);
-                // Per ora, usciamo dal ciclo del gioco
-                break;
+                // Ricevo una domanda dal server
             }
         }
     }

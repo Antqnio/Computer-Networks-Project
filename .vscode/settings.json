@@ -3,6 +3,7 @@
         "string.h": "c",
         "inet.h": "c",
         "stampa_delimitatore.h": "c",
-        "constants.h": "c"
+        "constants.h": "c",
+        "send_recv_all.h": "c"
     }
 }

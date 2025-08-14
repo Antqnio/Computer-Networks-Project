@@ -35,11 +35,12 @@ ssize_t send_all(int sock, const void *buf, size_t len, void (*gestisci_ritorno_
     const char *p = buf;
     while (total < len) {
         ssize_t s = send(sock, p + total, len - total, 0);
-        if (s <= 0)
+        if (s <= 0) {
             gestisci_ritorno_send(s, sock, errore_msg); // Errore o connessione chiusa
             if (s == 0) {
                 return total; // Connessione chiusa
             }
+        }
         total += s;
     }
     return total; // Ritorna il numero totale di byte inviati
