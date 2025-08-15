@@ -126,130 +126,6 @@ int nickname_gia_registrato(const char* nickname, struct Giocatore* curr) {
     }
 }
 
-void gestisci_ritorno_recv_send_lato_server(int ret, int sd, const char* msg) {
-    // Funzione per gestire il ritorno di recv
-    if (ret <= 0) {
-        if (ret == 0) {
-            printf("Socket lato client chiuso.\n");
-        } else {
-            perror(msg);
-        }
-        // Chiudo il socket associato al client sia nel caso di errore che di chiusura
-        close(sd);
-        pthread_exit(NULL); // Termina il thread
-    }
-}
-
-void invia_ack(int sd, uint8_t ack) {
-    // Funzione per inviare un ACK al client
-    ssize_t ret = send(sd, &ack, sizeof(ack), 0);
-    if (ret <= 0) {
-        perror("Errore nell'invio dell'ACK al client");
-        close(sd);
-        pthread_exit(NULL); // Termina il thread
-    }
-}
-
-struct Giocatore* crea_giocatore(int cl_sd) {
-    char nickname[NICKNAME_MAX_LENGTH];
-    uint32_t stato_del_nickname = 0;
-    // Ricevi il nickname dal client
-    while (stato_del_nickname == NICKNAME_ERRATO) {
-        memset(nickname, 0, sizeof(nickname)); // Inizializza il nickname
-        // Ricevi la lunghezza del nickname
-        uint32_t lunghezza_nickname = 0;
-        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della lunghezza del nickname");
-        // printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
-        lunghezza_nickname = ntohl(lunghezza_nickname); // Converto in formato host
-        // Ricevi il nickname dal client
-        if (lunghezza_nickname == 0 || lunghezza_nickname >= NICKNAME_MAX_LENGTH) {
-            // Se la lunghezza del nickname è 0 o troppo lunga, gestisci l'errore
-            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
-            continue;
-        }
-        // Lunghezza valida: informo il client che può inviare il nickname
-        invia_ack(cl_sd, 1); // Invia un ACK positivo al client
-        // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
-        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione del nickname");
-        // Controlla se il nickname è valido
-        if (nickname_gia_registrato(nickname, albero_giocatori)) {
-            // printf("Nickname errato o già registrato: %s\n", nickname);
-            // Invia un messaggio di errore al client, così può riprovare a inviare un nickname valido
-            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
-            continue;
-        }
-        else {
-            // printf("Nickname valido: %s\n", nickname);
-            stato_del_nickname = NICKNAME_VALIDO;
-            invia_ack(cl_sd, 1); // Invia un ACK positivo al client
-            continue;
-        }
-    }
-    // Se siamo qui, il nickname è valido, quindi creiamo un nuovo Giocatore
-    struct Giocatore* nuovoGiocatore = malloc(sizeof(struct Giocatore));
-    nuovoGiocatore->socket = cl_sd;
-    memset(nuovoGiocatore->nickname, 0, sizeof(nuovoGiocatore->nickname)); // Pulizia del campo nickname
-    strcpy(nuovoGiocatore->nickname, nickname); // Copia il nickname nel nuovo giocatore
-    nuovoGiocatore->left  = NULL;
-    nuovoGiocatore->right = NULL;
-    inserisci_giocatore(nuovoGiocatore, &albero_giocatori); // Aggiungi il nuovo giocatore alla lista dei giocatori
-    return nuovoGiocatore;
-
-}
-
-void invia_quiz_disponibili(struct Giocatore* giocatore) {
-    char messaggio_di_errore[256];
-    // Prima invio il numero di quiz disponibili
-    uint32_t numero_di_quiz_disponibili_net = htonl(numero_di_quiz_disponibili); // Converto in formato di rete
-    size_t dimensione_messaggio = sizeof(numero_di_quiz_disponibili);
-    // Scrivo il messaggio di errore
-    memset(messaggio_di_errore, 0, sizeof(messaggio_di_errore));
-    snprintf(messaggio_di_errore, sizeof(messaggio_di_errore), "Errore nell'invio del numero dei quiz al client %s: ", giocatore->nickname);
-    send_all(giocatore->socket, (void*)&numero_di_quiz_disponibili_net, dimensione_messaggio, gestisci_ritorno_recv_send_lato_server, messaggio_di_errore);
-
-    // Ora invio i temi come una stringa unica il cui separatore è '\n'.
-    size_t dim = 1024;
-    char buffer[dim];
-    memset(buffer, 0, dim);
-    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        strcat(buffer, quiz_disponibili[i]);
-        strcat(buffer, "\n"); // Uso "\n" come separatore
-    }
-    // Prima di inviare i temi, calcolo la lunghezza del buffer e la converto in formato di rete,
-    // per poi inviarla al client.
-    send_all(giocatore->socket, (void*)&dim, sizeof(dim), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei temi al client");
-
-    // Ora invio il buffer contenente i temi
-    send_all(giocatore->socket, (void*)buffer, dim, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei temi al client");
-
-}
-
-uint8_t ricevi_quiz_scelto(struct Giocatore* giocatore) {
-    ssize_t ret;
-    uint8_t quiz_scelto = 0;
-    while(quiz_scelto < 1 || quiz_scelto > numero_di_quiz_disponibili) {
-        // Ricevo il quiz scelto dal client (uso recv perhé è un uint8_t)
-        ret = recv(giocatore->socket, (void*)&quiz_scelto, sizeof(quiz_scelto), 0);
-        gestisci_ritorno_recv_send_lato_server(ret, giocatore->socket, "Errore nella ricezione del quiz scelto dal client");
-        if (quiz_scelto < 1 || quiz_scelto > numero_di_quiz_disponibili) {
-            invia_ack(giocatore->socket, 0); // Invia un ACK negativo al client
-        }
-        else {
-            invia_ack(giocatore->socket, 1); // Invia un ACK positivo al client
-            printf("Il client %s ha scelto il quiz: %s\n", giocatore->nickname, quiz_disponibili[quiz_scelto - 1]);
-        }
-    }
-    return quiz_scelto; // Ritorno il numero del quiz scelto
-}
-
-void string_to_lower(char *s) {
-    // Funzione per convertire una stringa in minuscolo
-    for (int i = 0; s[i] != '\0'; i++) {
-        s[i] = tolower((unsigned char)s[i]);
-    }
-}
-
-
 void rimuovi_giocatore_da_albero_ricorsivo(struct Giocatore** albero, struct Giocatore* giocatore) {
     // Funzione per rimuovere un giocatore dall'albero binario di ricerca
     if (*albero == NULL) {
@@ -383,6 +259,205 @@ void elimina_giocatore(struct Giocatore* curr) {
 }
 
 
+struct Giocatore* trova_giocatore(int sd, struct Giocatore* curr) {
+    struct Giocatore* giocatore = NULL;
+    if (curr == NULL) {
+        return NULL; // Se l'albero è vuoto, ritorna NULL
+    }
+    if (curr->socket == sd) {
+        return curr; // Trovato il giocatore con il socket corrispondente
+    }
+    giocatore = trova_giocatore(sd, curr->left);
+    return giocatore ? giocatore : trova_giocatore(sd, curr->right);
+}
+
+void stampa_punteggi(struct Punteggio* curr) {
+    // Funzione per stampare i punteggi in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
+    if (curr == NULL) {
+        return; // Se l'albero è vuoto, ritorna
+    }
+    stampa_punteggi(curr->left); // Stampa il sottoalbero sinistro
+    printf("- %s %d\n", curr->giocatore->nickname, curr->punteggio);
+    stampa_punteggi(curr->right); // Stampa il sottoalbero destro
+}
+
+void stampa_giocatori_quiz_completati(struct Giocatore_Quiz* curr) {
+    // Funzione per stampare i giocatori che hanno completato il quiz in ordine alfabetico di nickname
+    if (curr == NULL) {
+        return; // Se l'albero è vuoto, ritorna
+    }
+    stampa_giocatori_quiz_completati(curr->left); // Stampa il sottoalbero sinistro
+    printf("- %s\n", curr->giocatore->nickname);
+    stampa_giocatori_quiz_completati(curr->right); // Stampa il sottoalbero destro
+}
+
+
+
+
+void stampa_interfaccia() {
+    stampa_delimitatore();
+    printf("Temi:\n");
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
+        printf("%d - %s\n", i + 1, quiz_disponibili[i]);
+    }
+    stampa_delimitatore();
+    printf("\n");
+
+    printf("Partecipanti (%d):\n", ottieni_partecipanti(albero_giocatori));
+    stampa_partecipanti(albero_giocatori); // Funzione per stampare i partecipanti
+    printf("\n\n");
+
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
+        if (vettore_punteggi[i] == NULL) {
+            continue; // Se non ci sono punteggi per questo tema, salta
+        }
+        printf("Punteggi tema %d:\n", i + 1);
+        stampa_punteggi(vettore_punteggi[i]); // Funzione per stampare i punteggi
+        printf("\n");
+    }
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
+        if (quiz_completati[i] == NULL) {
+            continue; // Se non ci sono quiz completati per questo tema, salta
+        }
+        printf("Quiz tema %d completato\n", i + 1);
+        stampa_giocatori_quiz_completati(quiz_completati[i]); // Funzione per stampare i giocatori che hanno completato il quiz
+        printf("\n");
+    }
+    printf("------\n");
+}
+
+
+
+void gestisci_ritorno_recv_send_lato_server(int ret, int sd, const char* msg) {
+    // Funzione per gestire il ritorno di recv
+    if (ret <= 0) {
+        if (ret == 0) {
+            printf("Socket lato client chiuso.\n");
+        } else {
+            perror(msg);
+        }
+        // Chiudo il socket associato al client sia nel caso di errore che di chiusura
+        // Elimino il giocatore associato al socket
+        // Trovare il giocatore è O(n), però ci si aspetta che le disconnessioni non siano tanto frequenti
+        struct Giocatore* giocatore = trova_giocatore(sd, albero_giocatori);
+        elimina_giocatore(giocatore);
+        close(sd);
+        stampa_interfaccia(); // Stampa l'interfaccia dopo la disconnessione
+        pthread_exit(NULL); // Termina il thread
+    }
+}
+
+void invia_ack(int sd, uint8_t ack) {
+    // Funzione per inviare un ACK al client
+    ssize_t ret = send(sd, &ack, sizeof(ack), 0);
+    if (ret <= 0) {
+        perror("Errore nell'invio dell'ACK al client");
+        close(sd);
+        pthread_exit(NULL); // Termina il thread
+    }
+}
+
+struct Giocatore* crea_giocatore(int cl_sd) {
+    char nickname[NICKNAME_MAX_LENGTH];
+    uint32_t stato_del_nickname = 0;
+    // Ricevi il nickname dal client
+    while (stato_del_nickname == NICKNAME_ERRATO) {
+        memset(nickname, 0, sizeof(nickname)); // Inizializza il nickname
+        // Ricevi la lunghezza del nickname
+        uint32_t lunghezza_nickname = 0;
+        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della lunghezza del nickname");
+        // printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
+        lunghezza_nickname = ntohl(lunghezza_nickname); // Converto in formato host
+        // Ricevi il nickname dal client
+        if (lunghezza_nickname == 0 || lunghezza_nickname >= NICKNAME_MAX_LENGTH) {
+            // Se la lunghezza del nickname è 0 o troppo lunga, gestisci l'errore
+            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
+            continue;
+        }
+        // Lunghezza valida: informo il client che può inviare il nickname
+        invia_ack(cl_sd, 1); // Invia un ACK positivo al client
+        // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
+        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione del nickname");
+        // Controlla se il nickname è valido
+        if (nickname_gia_registrato(nickname, albero_giocatori)) {
+            // printf("Nickname errato o già registrato: %s\n", nickname);
+            // Invia un messaggio di errore al client, così può riprovare a inviare un nickname valido
+            invia_ack(cl_sd, 0); // Invia un ACK negativo al client
+            continue;
+        }
+        else {
+            // printf("Nickname valido: %s\n", nickname);
+            stato_del_nickname = NICKNAME_VALIDO;
+            invia_ack(cl_sd, 1); // Invia un ACK positivo al client
+            continue;
+        }
+    }
+    // Se siamo qui, il nickname è valido, quindi creiamo un nuovo Giocatore
+    struct Giocatore* nuovoGiocatore = malloc(sizeof(struct Giocatore));
+    nuovoGiocatore->socket = cl_sd;
+    memset(nuovoGiocatore->nickname, 0, sizeof(nuovoGiocatore->nickname)); // Pulizia del campo nickname
+    strcpy(nuovoGiocatore->nickname, nickname); // Copia il nickname nel nuovo giocatore
+    nuovoGiocatore->left  = NULL;
+    nuovoGiocatore->right = NULL;
+    inserisci_giocatore(nuovoGiocatore, &albero_giocatori); // Aggiungi il nuovo giocatore alla lista dei giocatori
+    return nuovoGiocatore;
+
+}
+
+void invia_quiz_disponibili(struct Giocatore* giocatore) {
+    char messaggio_di_errore[256];
+    // Prima invio il numero di quiz disponibili
+    uint32_t numero_di_quiz_disponibili_net = htonl(numero_di_quiz_disponibili); // Converto in formato di rete
+    size_t dimensione_messaggio = sizeof(numero_di_quiz_disponibili);
+    // Scrivo il messaggio di errore
+    memset(messaggio_di_errore, 0, sizeof(messaggio_di_errore));
+    snprintf(messaggio_di_errore, sizeof(messaggio_di_errore), "Errore nell'invio del numero dei quiz al client %s: ", giocatore->nickname);
+    send_all(giocatore->socket, (void*)&numero_di_quiz_disponibili_net, dimensione_messaggio, gestisci_ritorno_recv_send_lato_server, messaggio_di_errore);
+
+    // Ora invio i temi come una stringa unica il cui separatore è '\n'.
+    size_t dim = 1024;
+    char buffer[dim];
+    memset(buffer, 0, dim);
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
+        strcat(buffer, quiz_disponibili[i]);
+        strcat(buffer, "\n"); // Uso "\n" come separatore
+    }
+    // Prima di inviare i temi, calcolo la lunghezza del buffer e la converto in formato di rete,
+    // per poi inviarla al client.
+    send_all(giocatore->socket, (void*)&dim, sizeof(dim), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei temi al client");
+
+    // Ora invio il buffer contenente i temi
+    send_all(giocatore->socket, (void*)buffer, dim, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei temi al client");
+
+}
+
+uint8_t ricevi_quiz_scelto(struct Giocatore* giocatore) {
+    ssize_t ret;
+    uint8_t quiz_scelto = 0;
+    while(quiz_scelto < 1 || quiz_scelto > numero_di_quiz_disponibili) {
+        // Ricevo il quiz scelto dal client (uso recv perhé è un uint8_t)
+        ret = recv(giocatore->socket, (void*)&quiz_scelto, sizeof(quiz_scelto), 0);
+        gestisci_ritorno_recv_send_lato_server(ret, giocatore->socket, "Errore nella ricezione del quiz scelto dal client");
+        if (quiz_scelto < 1 || quiz_scelto > numero_di_quiz_disponibili) {
+            invia_ack(giocatore->socket, 0); // Invia un ACK negativo al client
+        }
+        else {
+            invia_ack(giocatore->socket, 1); // Invia un ACK positivo al client
+            printf("Il client %s ha scelto il quiz: %s\n", giocatore->nickname, quiz_disponibili[quiz_scelto - 1]);
+        }
+    }
+    return quiz_scelto; // Ritorno il numero del quiz scelto
+}
+
+void string_to_lower(char *s) {
+    // Funzione per convertire una stringa in minuscolo
+    for (int i = 0; s[i] != '\0'; i++) {
+        s[i] = tolower((unsigned char)s[i]);
+    }
+}
+
+
+
 
 
 void inserisci_giocatore_quiz_completato_ricorsivo(struct Giocatore* curr, struct Giocatore_Quiz** quiz_completato) {
@@ -500,58 +575,8 @@ void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nu
 }
 
 
-void stampa_punteggi(struct Punteggio* curr) {
-    // Funzione per stampare i punteggi in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
-    if (curr == NULL) {
-        return; // Se l'albero è vuoto, ritorna
-    }
-    stampa_punteggi(curr->left); // Stampa il sottoalbero sinistro
-    printf("- %s %d\n", curr->giocatore->nickname, curr->punteggio);
-    stampa_punteggi(curr->right); // Stampa il sottoalbero destro
-}
-
-void stampa_giocatori_quiz_completati(struct Giocatore_Quiz* curr) {
-    // Funzione per stampare i giocatori che hanno completato il quiz in ordine alfabetico di nickname
-    if (curr == NULL) {
-        return; // Se l'albero è vuoto, ritorna
-    }
-    stampa_giocatori_quiz_completati(curr->left); // Stampa il sottoalbero sinistro
-    printf("- %s\n", curr->giocatore->nickname);
-    stampa_giocatori_quiz_completati(curr->right); // Stampa il sottoalbero destro
-}
 
 
-void stampa_interfaccia() {
-    stampa_delimitatore();
-    printf("Temi:\n");
-    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        printf("%d - %s\n", i + 1, quiz_disponibili[i]);
-    }
-    stampa_delimitatore();
-    printf("\n");
-
-    printf("Partecipanti (%d):\n", ottieni_partecipanti(albero_giocatori));
-    stampa_partecipanti(albero_giocatori); // Funzione per stampare i partecipanti
-    printf("\n\n");
-
-    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        if (vettore_punteggi[i] == NULL) {
-            continue; // Se non ci sono punteggi per questo tema, salta
-        }
-        printf("Punteggi tema %d:\n", i + 1);
-        stampa_punteggi(vettore_punteggi[i]); // Funzione per stampare i punteggi
-        printf("\n");
-    }
-    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        if (quiz_completati[i] == NULL) {
-            continue; // Se non ci sono quiz completati per questo tema, salta
-        }
-        printf("Quiz tema %d completato\n", i + 1);
-        stampa_giocatori_quiz_completati(quiz_completati[i]); // Funzione per stampare i giocatori che hanno completato il quiz
-        printf("\n");
-    }
-    printf("------\n");
-}
 
 void crea_stringa_punteggio(int sd, struct Punteggio* punteggio, char* buffer, uint32_t buf_size, char* start) {
     // Funzione per inviare il punteggio al client
@@ -852,7 +877,7 @@ int main () {
         exit(EXIT_FAILURE);
     }
     len = sizeof(cl_addr);
-    pthread_mutex_init(&mutex_albero_giocatori, NULL); // Inizializzo il mutex per la mutual esclusione dell'albero dei giocatori
+    pthread_mutex_init(&mutex_albero_giocatori, NULL); // Inizializzo il mutex per la mutua esclusione dell'albero dei giocatori
     ottieni_quiz_disponibili(); // Funzione per ottenere i quiz disponibili
     while(1) {
         cl_sd = accept(sd, (struct sockaddr*)&cl_addr, &len);
