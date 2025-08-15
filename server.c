@@ -17,10 +17,13 @@
 #define PORTA 4242
 #define BACKLOG_SIZE 10
 #define LUNGHEZZA_MASSIMA_QUIZ 10
-
+#define NUMERO_DOMANDE 5
 
 const char RISPOSTA_CORRETTA[] = "Risposta corretta";
 const char RISPOSTA_ERRATA[] = "Risposta errata";
+pthread_mutex_t mutex_albero_giocatori; // Mutex per proteggere l'accesso all'albero dei giocatori
+pthread_mutex_t* mutex_punteggi; // Array di mutex per proteggere l'accesso ai punteggi
+pthread_mutex_t* mutex_quiz_completati; // Array di mutex per proteggere l'accesso ai quiz completati
 
 struct Giocatore {
     int socket;
@@ -70,30 +73,31 @@ void stampa_partecipanti(struct Giocatore* curr) {
 }
 
 
-void inserisci_giocatore_ricorsivo(struct Giocatore* curr, struct Giocatore* nuovoGiocatore) {
+void inserisci_giocatore_ricorsivo(struct Giocatore* curr, struct Giocatore* nuovo_giocatore) {
     // Funzione ricorsiva per inserire un giocatore nell'albero binario di ricerca
-    if (strcmp(nuovoGiocatore->nickname, curr->nickname) < 0) {
+    if (strcmp(nuovo_giocatore->nickname, curr->nickname) < 0) {
         // Se il nuovo giocatore è "minore" del corrente, va a sinistra
         if (curr->left == NULL) {
-            curr->left = nuovoGiocatore;
+            curr->left = nuovo_giocatore;
             curr->left->left = NULL;
             curr->left->right = NULL;
         } else {
-            inserisci_giocatore_ricorsivo(curr->left, nuovoGiocatore);
+            inserisci_giocatore_ricorsivo(curr->left, nuovo_giocatore);
         }
     } else {
         // Altrimenti va a destra
         if (curr->right == NULL) {
-            curr->right = nuovoGiocatore;
+            curr->right = nuovo_giocatore;
             curr->right->left = NULL;
             curr->right->right = NULL;
         } else {
-            inserisci_giocatore_ricorsivo(curr->right, nuovoGiocatore);
+            inserisci_giocatore_ricorsivo(curr->right, nuovo_giocatore);
         }
     }
 }
 
 void inserisci_giocatore(struct Giocatore* nuovoGiocatore, struct Giocatore** albero) {
+    pthread_mutex_lock(&mutex_albero_giocatori); // Blocca l'accesso all'albero dei giocatori
     // Funzione per aggiungere un giocatore alla lista dei giocatori
     if (*albero == NULL) {
         // Se l'albero è vuoto, inizializza l'albero con il nuovo giocatore
@@ -102,6 +106,7 @@ void inserisci_giocatore(struct Giocatore* nuovoGiocatore, struct Giocatore** al
         // Altrimenti, inserisci il nuovo giocatore nell'albero in ordine alfabetico di nickname
         inserisci_giocatore_ricorsivo(albero_giocatori, nuovoGiocatore);
     }
+    pthread_mutex_unlock(&mutex_albero_giocatori); // Sblocca l'accesso all'albero dei giocatori
 }
 
 int nickname_gia_registrato(const char* nickname, struct Giocatore* curr) {
@@ -245,17 +250,17 @@ void string_to_lower(char *s) {
 }
 
 
-void rimuovi_giocatore_da_albero(struct Giocatore** albero, struct Giocatore* giocatore) {
+void rimuovi_giocatore_da_albero_ricorsivo(struct Giocatore** albero, struct Giocatore* giocatore) {
     // Funzione per rimuovere un giocatore dall'albero binario di ricerca
     if (*albero == NULL) {
         return; // Se l'albero è vuoto, ritorna
     }
     if (strcmp(giocatore->nickname, (*albero)->nickname) < 0) {
         // Se il giocatore da rimuovere è "minore", cerca nel sottoalbero sinistro
-        rimuovi_giocatore_da_albero(&(*albero)->left, giocatore);
+        rimuovi_giocatore_da_albero_ricorsivo(&(*albero)->left, giocatore);
     } else if (strcmp(giocatore->nickname, (*albero)->nickname) > 0) {
         // Altrimenti cerca nel sottoalbero destro
-        rimuovi_giocatore_da_albero(&(*albero)->right, giocatore);
+        rimuovi_giocatore_da_albero_ricorsivo(&(*albero)->right, giocatore);
     } else {
         // Trovato il giocatore da rimuovere
         struct Giocatore* temp = *albero;
@@ -273,23 +278,29 @@ void rimuovi_giocatore_da_albero(struct Giocatore** albero, struct Giocatore* gi
             }
             strcpy((*albero)->nickname, min->nickname); // Copia il nickname del minimo
             (*albero)->socket = min->socket; // Copia il socket del minimo
-            rimuovi_giocatore_da_albero(&(*albero)->right, min); // Rimuovi il minimo dal sottoalbero destro
+            rimuovi_giocatore_da_albero_ricorsivo(&(*albero)->right, min); // Rimuovi il minimo dal sottoalbero destro
             // La free viene fatta nella chiamata ricorsiva
         }
     }
 }
 
-void rimuovi_giocatore_da_punteggi(struct Punteggio** punteggi, struct Giocatore* giocatore) {
+void rimuovi_giocatore_da_albero(struct Giocatore** albero, struct Giocatore* giocatore) {
+    pthread_mutex_lock(&mutex_albero_giocatori); // Blocca l'accesso all'albero dei giocatori
+    rimuovi_giocatore_da_albero_ricorsivo(albero, giocatore);
+    pthread_mutex_unlock(&mutex_albero_giocatori); // Sblocca l'accesso all'albero dei giocatori
+}
+
+void rimuovi_giocatore_da_punteggi_ricorsivo(struct Punteggio** punteggi, struct Giocatore* giocatore) {
     // Funzione per rimuovere un giocatore dalla lista dei punteggi
     if (*punteggi == NULL) {
         return; // Se la lista è vuota, ritorna
     }
     if (strcmp(giocatore->nickname, (*punteggi)->giocatore->nickname) < 0) {
         // Se il giocatore da rimuovere è "minore", cerca nel sottoalbero sinistro
-        rimuovi_giocatore_da_punteggi(&(*punteggi)->left, giocatore);
+        rimuovi_giocatore_da_punteggi_ricorsivo(&(*punteggi)->left, giocatore);
     } else if (strcmp(giocatore->nickname, (*punteggi)->giocatore->nickname) > 0) {
         // Altrimenti cerca nel sottoalbero destro
-        rimuovi_giocatore_da_punteggi(&(*punteggi)->right, giocatore);
+        rimuovi_giocatore_da_punteggi_ricorsivo(&(*punteggi)->right, giocatore);
     } else {
         // Trovato il giocatore da rimuovere
         struct Punteggio* temp = *punteggi;
@@ -307,22 +318,31 @@ void rimuovi_giocatore_da_punteggi(struct Punteggio** punteggi, struct Giocatore
                 min = min->left;
             }
             (*punteggi)->giocatore = min->giocatore; // Copia il giocatore del minimo
-            rimuovi_giocatore_da_punteggi(&(*punteggi)->right, min->giocatore); // Rimuovi il minimo dal sottoalbero destro
+            rimuovi_giocatore_da_punteggi_ricorsivo(&(*punteggi)->right, min->giocatore); // Rimuovi il minimo dal sottoalbero destro
             // La free viene fatta nella chiamata ricorsiva
         }
     }
 }
-void rimuovi_giocatore_da_quiz_completati(struct Giocatore_Quiz** quiz_completati, struct Giocatore* giocatore) {
+
+
+void rimuovi_giocatore_da_punteggi(struct Punteggio** punteggi, struct Giocatore* giocatore, pthread_mutex_t* mutex) {
+    pthread_mutex_lock(mutex); // Blocca l'accesso alla lista dei punteggi
+    rimuovi_giocatore_da_punteggi_ricorsivo(punteggi, giocatore);
+    pthread_mutex_unlock(mutex); // Sblocca l'accesso alla lista dei punteggi
+}
+
+
+void rimuovi_giocatore_da_quiz_completati_ricorsivo(struct Giocatore_Quiz** quiz_completati, struct Giocatore* giocatore) {
     // Funzione per rimuovere un giocatore dalla lista dei quiz completati
     if (*quiz_completati == NULL) {
         return; // Se la lista è vuota, ritorna
     }
     if (strcmp(giocatore->nickname, (*quiz_completati)->giocatore->nickname) < 0) {
         // Se il giocatore da rimuovere è "minore", cerca nel sottoalbero sinistro
-        rimuovi_giocatore_da_quiz_completati(&(*quiz_completati)->left, giocatore);
+        rimuovi_giocatore_da_quiz_completati_ricorsivo(&(*quiz_completati)->left, giocatore);
     } else if (strcmp(giocatore->nickname, (*quiz_completati)->giocatore->nickname) > 0) {
         // Altrimenti cerca nel sottoalbero destro
-        rimuovi_giocatore_da_quiz_completati(&(*quiz_completati)->right, giocatore);
+        rimuovi_giocatore_da_quiz_completati_ricorsivo(&(*quiz_completati)->right, giocatore);
     } else {
         // Trovato il giocatore da rimuovere
         struct Giocatore_Quiz* temp = *quiz_completati;
@@ -339,22 +359,33 @@ void rimuovi_giocatore_da_quiz_completati(struct Giocatore_Quiz** quiz_completat
                 min = min->left;
             }
             (*quiz_completati)->giocatore = min->giocatore;
-            rimuovi_giocatore_da_quiz_completati(&(*quiz_completati)->right, min->giocatore); // Rimuovi il minimo dal sottoalbero destro
+            rimuovi_giocatore_da_quiz_completati_ricorsivo(&(*quiz_completati)->right, min->giocatore); // Rimuovi il minimo dal sottoalbero destro
             // La free del Giocatore_Quiz viene fatta nella chiamata ricorsiva
         }
     }
 }
 
+
+void rimuovi_giocatore_da_quiz_completati(struct Giocatore_Quiz** quiz_completati, struct Giocatore* giocatore, pthread_mutex_t* mutex) {
+    pthread_mutex_lock(mutex); // Blocca l'accesso alla lista dei quiz completati
+    rimuovi_giocatore_da_quiz_completati_ricorsivo(quiz_completati, giocatore);
+    pthread_mutex_unlock(mutex); // Sblocca l'accesso alla lista dei quiz completati
+}
+
+
+
 void elimina_giocatore(struct Giocatore* curr) {
     for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        rimuovi_giocatore_da_punteggi(&vettore_punteggi[i], curr);
-        rimuovi_giocatore_da_quiz_completati(&quiz_completati[i], curr);
+        rimuovi_giocatore_da_punteggi(&vettore_punteggi[i], curr, &mutex_punteggi[i]);
+        rimuovi_giocatore_da_quiz_completati(&quiz_completati[i], curr, &mutex_quiz_completati[i]);
     }
     rimuovi_giocatore_da_albero(&albero_giocatori, curr);
 }
 
 
-void inserisci_giocatore_quiz_completato(struct Giocatore* curr, struct Giocatore_Quiz** quiz_completato) {
+
+
+void inserisci_giocatore_quiz_completato_ricorsivo(struct Giocatore* curr, struct Giocatore_Quiz** quiz_completato) {
     // Funzione per inserire un giocatore nell'albero dei quiz completati
     if (*quiz_completato == NULL) {
         // Se l'albero è vuoto, inizializza l'albero con il nuovo giocatore
@@ -365,13 +396,20 @@ void inserisci_giocatore_quiz_completato(struct Giocatore* curr, struct Giocator
     } else {
         // Altrimenti, inserisci il nuovo giocatore nell'albero in ordine alfabetico di nickname
         if (strcmp(curr->nickname, (*quiz_completato)->giocatore->nickname) < 0) {
-            inserisci_giocatore_quiz_completato(curr, &(*quiz_completato)->left);
+            inserisci_giocatore_quiz_completato_ricorsivo(curr, &(*quiz_completato)->left);
         } else {
-            inserisci_giocatore_quiz_completato(curr, &(*quiz_completato)->right);
+            inserisci_giocatore_quiz_completato_ricorsivo(curr, &(*quiz_completato)->right);
         }
     }
 
 }
+
+void inserisci_giocatore_quiz_completato(struct Giocatore* curr, struct Giocatore_Quiz** quiz_completato, pthread_mutex_t* mutex) {
+    pthread_mutex_lock(mutex); // Blocca l'accesso all'albero dei quiz completati
+    inserisci_giocatore_quiz_completato_ricorsivo(curr, quiz_completato);
+    pthread_mutex_unlock(mutex); // Sblocca l'accesso all'albero dei quiz
+}
+
 
 struct Punteggio* crea_punteggio(struct Giocatore* curr, uint32_t curr_punteggio) {
     // Funzione per creare un nuovo punteggio
@@ -384,10 +422,10 @@ struct Punteggio* crea_punteggio(struct Giocatore* curr, uint32_t curr_punteggio
 }
 
 void salva_quiz_completato(struct Giocatore* curr, char quiz_scelto) {
-    inserisci_giocatore_quiz_completato(curr, &quiz_completati[quiz_scelto - 1]); // Inserisco il giocatore nell'albero dei giocatori
+    inserisci_giocatore_quiz_completato(curr, &quiz_completati[quiz_scelto - 1], &mutex_quiz_completati[quiz_scelto - 1]); // Inserisco il giocatore nell'albero dei giocatori
 }
 
-void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nuovo_punteggio) {
+void aggiorna_punteggio_ricorsivo(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nuovo_punteggio) {
     // Funzione per cambiare il punteggio del giocatore curr nel quiz scelto.
     // L'albero è ordinato in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname.
 
@@ -405,8 +443,8 @@ void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nu
                 // Se il giocatore è già presente, incrementa il punteggio.
                 // Per farlo, cancello il nodo corrente e creo un nuovo nodo con il punteggio incrementato.
                 // Devo fare così, altrimenti romperei l'ordinamento.
-                rimuovi_giocatore_da_punteggi(&vettore_punteggi[quiz_scelto - 1], curr);
-                aggiorna_punteggio(curr, quiz_scelto, nuovo_punteggio);
+                rimuovi_giocatore_da_punteggi(&vettore_punteggi[quiz_scelto - 1], curr, &mutex_punteggi[quiz_scelto - 1]);
+                aggiorna_punteggio_ricorsivo(curr, quiz_scelto, nuovo_punteggio);
                 return;
             }
             else {
@@ -453,6 +491,14 @@ void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nu
         }
     }
 }
+
+
+void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nuovo_punteggio) {
+    pthread_mutex_lock(&mutex_punteggi[quiz_scelto - 1]); // Blocca l'accesso all'albero dei punteggi
+    aggiorna_punteggio_ricorsivo(curr, quiz_scelto, nuovo_punteggio);
+    pthread_mutex_unlock(&mutex_punteggi[quiz_scelto - 1]); // Sblocca l'accesso all'albero dei punteggi
+}
+
 
 void stampa_punteggi(struct Punteggio* curr) {
     // Funzione per stampare i punteggi in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
@@ -590,10 +636,11 @@ void* gestisci_connessione(void* arg) {
     // 2. Riceve il quiz scelto dal client
     // 3. Inizia il quiz con il client
     while(1) {
-        int c;
+        int c = 0;
         invia_quiz_disponibili(giocatore); // Funzione per inviare i quiz disponibili al giocatore
         quiz_scelto = ricevi_quiz_scelto(giocatore); // Funzione per ricevere il quiz scelto dal giocatore
         // Adesso il client può iniziare a giocare con il quiz scelto.
+        int domande_inviate = 0; // Contatore delle domande inviate
         char filename[256];
         memset(filename, 0, sizeof(filename)); // Inizializzo il buffer del nome del file
         snprintf(filename, sizeof(filename), "quiz/%d.txt", quiz_scelto); // Costruisco il nome del file del quiz scelto
@@ -606,7 +653,7 @@ void* gestisci_connessione(void* arg) {
         domanda_non_ancora_inviata = 1; // Setto la variabile per indicare che la domanda non è ancora stata inviata
         // Leggo le domande dal file e le invio al client
         punteggio = 0; // Resetto il punteggio per il nuovo quiz
-        while (c != EOF) {
+        while (c != EOF && domande_inviate < NUMERO_DOMANDE) {
             // Invio, in ordine di scrittura, le domande del quiz scelto al client
             int i = 0;
             memset(domanda, 0, sizeof(domanda)); // Inizializzo il buffer della domanda
@@ -624,6 +671,7 @@ void* gestisci_connessione(void* arg) {
                 send(cl_sd, &dimensione_domanda, sizeof(dimensione_domanda), 0); // Invia la dimensione della domanda al client
                 gestisci_ritorno_recv_send_lato_server(dimensione_domanda, cl_sd, "Errore nell'invio della dimensione della domanda al client");
                 // Invio la domanda al client
+                printf("Invio domanda al client %s: %s\n", giocatore->nickname, domanda);
                 send_all(cl_sd, (void*)domanda, i, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della domanda al client");
             }
             // Ricevo la dimensione della risposta dal client (tale dimensione è di 1 byte)
@@ -677,9 +725,15 @@ void* gestisci_connessione(void* arg) {
                     break;  // Trovato il carattere '\n', interrompe, così da passare alla prossima domanda
                 }
                 risposta_server[i++] = c; // Aggiungo il carattere al buffer della risposta
-                printf("Risposta del server: %s\n", risposta_server); // Stampo la risposta del server
+                // printf("Risposta del server: %s\n", risposta_server); // Stampo la risposta del server
             }
+
             domanda_non_ancora_inviata = 1; // Setto la variabile per la prossima domanda
+            ++domande_inviate; // Incremento il contatore delle domande inviate
+            while (c != '\n' && c != EOF) {
+                // Scarto il resto della riga (fino al carattere '\n' o EOF) per passare alla prossima domanda
+                c = fgetc(fp);
+            }
         }
         // Questo client ha completato il quiz
         salva_quiz_completato(giocatore, quiz_scelto);
@@ -761,7 +815,15 @@ void ottieni_quiz_disponibili() {
         fclose(fp);
         return;
     }
-    // Chiudo il file info.txt
+    mutex_punteggi = malloc(numero_di_quiz_disponibili * sizeof(pthread_mutex_t)); // Alloco il vettore dei mutex per i punteggi
+    mutex_quiz_completati = malloc(numero_di_quiz_disponibili * sizeof(pthread_mutex_t)); // Alloco il vettore dei mutex per i quiz completati
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
+        vettore_punteggi[i] = NULL; // Inizializzo il vettore dei punteggi a NULL
+        quiz_completati[i] = NULL; // Inizializzo il vettore dei quiz completati a NULL
+        pthread_mutex_init(&mutex_punteggi[i], NULL); // Inizializzo il mutex per i punteggi
+        pthread_mutex_init(&mutex_quiz_completati[i], NULL); // Inizializzo il mutex per i quiz completati
+    }
+    // Chiudo il file
     fclose(fp);
 }
 
@@ -790,6 +852,7 @@ int main () {
         exit(EXIT_FAILURE);
     }
     len = sizeof(cl_addr);
+    pthread_mutex_init(&mutex_albero_giocatori, NULL); // Inizializzo il mutex per la mutual esclusione dell'albero dei giocatori
     ottieni_quiz_disponibili(); // Funzione per ottenere i quiz disponibili
     while(1) {
         cl_sd = accept(sd, (struct sockaddr*)&cl_addr, &len);

@@ -316,7 +316,6 @@ int main (int argc, char *argv[]) {
                 char risposta[30]; // Buffer per la risposta
                 char format[50]; // Buffer per il formato di scanf
                 char risposta_server[30]; // Buffer per la risposta del server
-                char esito[DIMENSIONE_RISPOSTA]; // Buffer per l'esito della risposta
                 size_t size_scanf = 30; // Dimensione massima della risposta da leggere + 1 (per '\0)
                 int prima_iterazione = 1;
                 // Ricevo la dimensione della domanda dal server
@@ -328,7 +327,6 @@ int main (int argc, char *argv[]) {
                 memset(domanda, 0, sizeof(domanda)); // Inizializza il buffer della domanda
                 recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");
                 // Stampa la domanda ricevuta
-                domanda[dimensione_domanda] = '\0'; // <-- aggiungi questa riga!
                 memset(risposta, 0, sizeof(risposta)); // Inizializza il buffer della risposta
                 printf("%s\n\nRisposta: ", domanda);
                 while (strlen(risposta) == 0) {
@@ -349,15 +347,10 @@ int main (int argc, char *argv[]) {
                 // la dimensione della risposta come un uint8_t, quindi non può essere > 255 o < 0.
                 // Invia la risposta al server
                 send_all(sd, (void*)risposta, strlen(risposta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della risposta al server");
-                // Ricevo l'esito della risposta dal server
+                // Ricevo la risposta dal server (contenente l'esito della risposta)
                 memset(risposta_server, 0, sizeof(risposta_server));
                 recv_all(sd, (void*)risposta_server, DIMENSIONE_RISPOSTA, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dell'esito della risposta del server");
-                if (strcmp(risposta_server, "Risposta corretta") == 0) {
-
-                }
-                else /* if (strcmp(risposta_server, "Risposta errata") == 0) */ {
-                    
-                }
+                printf("%s\n", risposta_server);
             }
         }
     }
