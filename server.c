@@ -18,6 +18,10 @@
 #define BACKLOG_SIZE 10
 #define LUNGHEZZA_MASSIMA_QUIZ 10
 
+
+const char RISPOSTA_CORRETTA[] = "Risposta corretta";
+const char RISPOSTA_ERRATA[] = "Risposta errata";
+
 struct Giocatore {
     int socket;
     char nickname[NICKNAME_MAX_LENGTH];
@@ -40,8 +44,8 @@ struct Giocatore_Quiz {
 
 
 struct Giocatore* albero_giocatori = NULL; // Lista dei giocatori connessi
-struct Punteggio** vettore_punteggi; // Vettore dei punteggi per ogni quiz
-struct Giocatore_Quiz** quiz_completati; // Vettore dei quiz completati
+struct Punteggio** vettore_punteggi = NULL; // Vettore dei punteggi per ogni quiz
+struct Giocatore_Quiz** quiz_completati =  NULL; // Vettore dei quiz completati
 
 //const char QUIZ_DISPONIBILI[numero_di_quiz_disponibili][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Cinema", "Arte"};
 uint32_t numero_di_quiz_disponibili = 0; // Numero di quiz disponibili
@@ -91,7 +95,7 @@ void inserisci_giocatore_ricorsivo(struct Giocatore* curr, struct Giocatore* nuo
 
 void inserisci_giocatore(struct Giocatore* nuovoGiocatore, struct Giocatore** albero) {
     // Funzione per aggiungere un giocatore alla lista dei giocatori
-    if (albero == NULL) {
+    if (*albero == NULL) {
         // Se l'albero è vuoto, inizializza l'albero con il nuovo giocatore
         *albero = nuovoGiocatore;
     } else {
@@ -342,7 +346,7 @@ void rimuovi_giocatore_da_quiz_completati(struct Giocatore_Quiz** quiz_completat
 }
 
 void elimina_giocatore(struct Giocatore* curr) {
-    for (int i = 0; i < numero_di_quiz_disponibili; ++i) {
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         rimuovi_giocatore_da_punteggi(&vettore_punteggi[i], curr);
         rimuovi_giocatore_da_quiz_completati(&quiz_completati[i], curr);
     }
@@ -474,7 +478,7 @@ void stampa_giocatori_quiz_completati(struct Giocatore_Quiz* curr) {
 void stampa_interfaccia() {
     stampa_delimitatore();
     printf("Temi:\n");
-    for (int i = 0; i < numero_di_quiz_disponibili; ++i) {
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         printf("%d - %s\n", i + 1, quiz_disponibili[i]);
     }
     stampa_delimitatore();
@@ -484,7 +488,7 @@ void stampa_interfaccia() {
     stampa_partecipanti(albero_giocatori); // Funzione per stampare i partecipanti
     printf("\n\n");
 
-    for (int i = 0; i < numero_di_quiz_disponibili; ++i) {
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         if (vettore_punteggi[i] == NULL) {
             continue; // Se non ci sono punteggi per questo tema, salta
         }
@@ -492,7 +496,7 @@ void stampa_interfaccia() {
         stampa_punteggi(vettore_punteggi[i]); // Funzione per stampare i punteggi
         printf("\n");
     }
-    for (int i = 0; i < numero_di_quiz_disponibili; ++i) {
+    for (uint32_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         if (quiz_completati[i] == NULL) {
             continue; // Se non ci sono quiz completati per questo tema, salta
         }
@@ -503,52 +507,70 @@ void stampa_interfaccia() {
     printf("------\n");
 }
 
-void crea_stringa_punteggio(int sd, struct Punteggio* punteggio, char* buffer) {
+void crea_stringa_punteggio(int sd, struct Punteggio* punteggio, char* buffer, uint32_t buf_size, char* start) {
     // Funzione per inviare il punteggio al client
     // Invia il punteggio del giocatore al client in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
     if (punteggio == NULL) {
         return; // Se il punteggio è NULL, non invio nulla
     }
     uint32_t punteggio_net = htonl(punteggio->punteggio); // Converto il punteggio in formato di rete
-    crea_stringa_punteggio(sd, punteggio->left, buffer); // Invia il punteggio del sottoalbero sinistro
-    // Invia il punteggio al client
-    
-    // Invia il nickname del giocatore associato a tale punteggio
+    crea_stringa_punteggio(sd, punteggio->left, buffer, buf_size, start); // Invia il punteggio del sottoalbero sinistro
+
+    // Salva il punteggio
+    snprintf(buffer + *start, buf_size, "%d|",  punteggio->punteggio);
+    // Salva il nickname del giocatore associato a tale punteggio
+    snprintf(buffer + *start + strlen(buffer + *start), buf_size - *start, "%s\n", punteggio->giocatore->nickname);
+    *start += strlen(buffer + *start); // Aggiorna l'indice di partenza per il prossimo punteggio
 
 
     send_all(sd, (void*)&punteggio_net, sizeof(punteggio_net), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio del punteggio al client");
     // Invia il nickname del giocatore
     send_all(sd, (void*)punteggio->giocatore->nickname, strlen(punteggio->giocatore->nickname) + 1, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio del nickname del giocatore al client");
-    crea_stringa_punteggio(sd, punteggio->right, buffer); // Invia il punteggio del sottoalbero destro
+    crea_stringa_punteggio(sd, punteggio->right, buffer, buf_size, start); // Invia il punteggio del sottoalbero destro
 }
 
 void invia_punteggio_di_ogni_tema(int sd) {
     // Funzione per inviare il punteggio di ogni tema al client
     // Per ogni tema, invia una stringa col seguente formato:
-    // "<punteggio>|<nickname>\n"
-    uint8_t quiz_con_punteggio = 0; // Variabile per contare i quiz con punteggio
+    // "<numero_tema>\n<punteggio>|<nickname>\n"
+    // Per capire se ho un numero_tema o un punteggio con nickname, basta vedere se nella riga ho un '|'
     char buffer[1024];
+    char start = 0;
+    memset(buffer, 0, sizeof(buffer)); // Inizializza il buffer
     for (uint8_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         if (vettore_punteggi[i] == NULL) {
             continue; // Se non ci sono punteggi per questo tema, salta
         }
-        ++quiz_con_punteggio; // Incrementa il contatore dei quiz con punteggio
-
-    }
-    // Invia il numero di quiz con punteggio al client (almeno sa quante volte deve ricevere i punteggi)
-    send(sd, &quiz_con_punteggio, sizeof(quiz_con_punteggio), 0);
-    gestisci_ritorno_recv_send_lato_server(quiz_con_punteggio, sd, "Errore nell'invio del numero di quiz con punteggio al client");
-    for (uint8_t i = 0; i < numero_di_quiz_disponibili; ++i) {
-        if (vettore_punteggi[i] == NULL) {
-            continue; // Se non ci sono punteggi per questo tema, salta
-        }
-        // Invia il numero del tema
-        send(sd, &i, sizeof(i), 0);
-        gestisci_ritorno_recv_send_lato_server(i, sd, "Errore nell'invio del numero del tema al client");
-        memset(buffer, 0, sizeof(buffer)); // Inizializza il buffer
-        crea_stringa_punteggio(sd, vettore_punteggi[i], buffer); // Invia i punteggi del tema al client
+        snprintf(buffer + start, sizeof(buffer) - start, "%d\n", i + 1); // Aggiungo il numero del tema
+        start += strlen(buffer + start); // Aggiorno l'indice di partenza
+        crea_stringa_punteggio(sd, vettore_punteggi[i], buffer, sizeof(buffer), &start); // Invia i punteggi del tema al client
+        // Invio la lunghezza della stringa al client
+        uint32_t lunghezza_buffer = htonl(strlen(buffer)); // Converto la lunghezza in formato di rete
+        send_all(sd, (void*)&lunghezza_buffer, sizeof(lunghezza_buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei punteggi al client");
+        // Invio la stringa al client                  
         send_all(sd, (void*)buffer, strlen(buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei punteggi del tema al client");
     }
+}
+
+void invia_risposta(int sd, const char* risposta, uint8_t dimensione_risposta) {
+    // Funzione per inviare la risposta del server al client
+    // Il client sa che la dimensione della risposta è di 18 byte (compresi i \0)
+    send(sd, &dimensione_risposta, sizeof(dimensione_risposta), 0);
+    // Invia la risposta al client
+    send_all(sd, (void*)risposta, dimensione_risposta, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della risposta del server al client");
+    
+}
+
+void invia_risposta_corretta(int sd) {
+    const char risposta_corretta[DIMENSIONE_RISPOSTA] = "Risposta corretta";
+    invia_risposta(sd, risposta_corretta, DIMENSIONE_RISPOSTA);
+}
+
+void invia_risposta_errata(int sd) {
+    char risposta_errata[DIMENSIONE_RISPOSTA];
+    memset(risposta_errata, 0, sizeof(risposta_errata));
+    strcpy(risposta_errata, "Risposta errata");
+    invia_risposta(sd, risposta_errata, DIMENSIONE_RISPOSTA);
 }
 
 
@@ -557,6 +579,7 @@ void* gestisci_connessione(void* arg) {
     int ret;
     uint8_t quiz_scelto;
     char domanda[1024], risposta_client[1024], risposta_server[1024]; // Buffer per le domande
+    uint8_t dimensione_domanda;
     uint8_t dimensione_risposta;
     uint8_t domanda_non_ancora_inviata = 0; // Variabile per non inviare più volte la stessa domanda al client (quando il client invia "show score" o "endquiz")
     uint32_t punteggio; // Punteggio del giocatore per il quiz
@@ -571,7 +594,10 @@ void* gestisci_connessione(void* arg) {
         invia_quiz_disponibili(giocatore); // Funzione per inviare i quiz disponibili al giocatore
         quiz_scelto = ricevi_quiz_scelto(giocatore); // Funzione per ricevere il quiz scelto dal giocatore
         // Adesso il client può iniziare a giocare con il quiz scelto.
-        FILE *fp = fopen("input.txt", "r");
+        char filename[256];
+        memset(filename, 0, sizeof(filename)); // Inizializzo il buffer del nome del file
+        snprintf(filename, sizeof(filename), "quiz/%d.txt", quiz_scelto); // Costruisco il nome del file del quiz scelto
+        FILE *fp = fopen(filename, "r");
         if (fp == NULL) {
             perror("Errore apertura file");
             close(cl_sd);
@@ -588,10 +614,15 @@ void* gestisci_connessione(void* arg) {
             if (domanda_non_ancora_inviata) {
                 while ((c = fgetc(fp)) != EOF) { // Leggo il file fino alla fine
                     if (c == '?') {
+                        domanda[i++] = c; // Aggiungo il carattere '?' al buffer della domanda
                         break;  // Trovato il carattere '?', interrompe
                     }
                     domanda[i++] = c; // Aggiungo il carattere al buffer della domanda
                 }
+                // Invio la lunghezza della domanda al client
+                dimensione_domanda = i; // La dimensione della domanda è pari al numero di caratteri letti
+                send(cl_sd, &dimensione_domanda, sizeof(dimensione_domanda), 0); // Invia la dimensione della domanda al client
+                gestisci_ritorno_recv_send_lato_server(dimensione_domanda, cl_sd, "Errore nell'invio della dimensione della domanda al client");
                 // Invio la domanda al client
                 send_all(cl_sd, (void*)domanda, i, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della domanda al client");
             }
@@ -602,6 +633,7 @@ void* gestisci_connessione(void* arg) {
             memset(risposta_client, 0, sizeof(risposta_client)); // Inizializzo il buffer della risposta
             recv_all(cl_sd, (void*)risposta_client, dimensione_risposta, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della risposta dal client");
             string_to_lower(risposta_client); // Converto la risposta del client in minuscolo
+            printf("Ricevuta risposta dal client %s: %s\n", giocatore->nickname, risposta_client);
             if (strcmp(risposta_client, "show score") == 0) {
                 invia_punteggio_di_ogni_tema(cl_sd);
                 domanda_non_ancora_inviata = 0; // Segno che il client ha già ricevuto la domanda
@@ -615,30 +647,37 @@ void* gestisci_connessione(void* arg) {
                 close(cl_sd); // Chiudo il socket del client
                 pthread_exit(NULL); // Termina il thread
             }
+            c = fgetc(fp); // Leggo il file per scartare lo spazio tra la domanda e le risposte
             i = 0; // Resetto l'indice per la risposta
             memset(risposta_server, 0, sizeof(risposta_server)); // Inizializzo il buffer della risposta del server
             while ((c = fgetc(fp)) != EOF) { // Leggo il file fino alla fine (la fine della risposta è segnata da un carattere '\n'. Le varie risposte valide sono separate da '|')
                 if (c == '|') { // Ho letto una risposta (valida) dal file
                     if (strcmp(risposta_client, risposta_server) == 0) {
-                        // Se trovo il carattere '|' e la risposta del client corrisponde alla risposta del server
-                        // Invia un messaggio di successo al client
-                        invia_ack(cl_sd, 1); // Invia un ACK positivo al client
-                        aggiorna_punteggio(giocatore, quiz_scelto, ++punteggio); // Incrementa il punteggio del client
+                        // Se trovo il carattere '|' e la risposta del client corrisponde alla risposta del server,
+                        // invio un messaggio di successo al client
+                        invia_risposta_corretta(cl_sd);
+                        printf("Risposta corretta del client %s: %s\n", giocatore->nickname, risposta_client);
+                        aggiorna_punteggio(giocatore, quiz_scelto, ++punteggio); // Incrementa il punteggio del client per questo tema
                         break;
                     }
                     memset(risposta_server, 0, sizeof(risposta_server)); // Resetto il buffer della risposta del server, così da fare il test con un'altra risposta valida
+                    i = 0; // Resetto l'indice per la risposta del server
                 }
                 else if (c == '\n') { // Ho letto l'ultima risposta (valida) dal file per quella domanda
                     if (strcmp(risposta_client, risposta_server) == 0) {
-                        // Se la risposta del client corrisponde alla risposta del server
-                        invia_ack(cl_sd, 1); // Invia un ACK positivo al client
+                        // Se la risposta del client corrisponde alla risposta del server, aggiorno il punteggio
+                        invia_risposta_corretta(cl_sd); // Invia un messaggio di successo al client
+                        printf("Risposta corretta del client %s: %s\n", giocatore->nickname, risposta_client);
                         aggiorna_punteggio(giocatore, quiz_scelto, ++punteggio); // Incrementa il punteggio del client
+                        stampa_interfaccia(); // Stampa l'interfaccia aggiornata
                     } else {
+                        invia_risposta_errata(cl_sd); // Invia un messaggio di errore al client
                         invia_ack(cl_sd, 0); // Invia un ACK negativo al client
                     }
                     break;  // Trovato il carattere '\n', interrompe, così da passare alla prossima domanda
                 }
                 risposta_server[i++] = c; // Aggiungo il carattere al buffer della risposta
+                printf("Risposta del server: %s\n", risposta_server); // Stampo la risposta del server
             }
             domanda_non_ancora_inviata = 1; // Setto la variabile per la prossima domanda
         }
@@ -667,7 +706,7 @@ void ottieni_quiz_disponibili() {
         return;
     }
 
-    // Alloca array di puntatori a stringa dove andrò a scrivere ogni tema letto dal file info.txt
+    // Alloca array di puntatori a stringa dove andrò a scrivere ogni tema letto dal file quiz_scelto.txt
     char **temi = malloc(numero_temi * sizeof(char *));
     if (!temi) {
         perror("Errore nella malloc");
@@ -733,8 +772,6 @@ int main () {
     pthread_t thread_id;
     struct sockaddr_in my_addr, cl_addr;
     stampa_interfaccia(); // Funzione per stampare l'interfaccia grafica
-    memset(quiz_completati, 0, sizeof(quiz_completati)); // Inizializzo il vettore dei quiz completati a NULL
-    memset(vettore_punteggi, 0, sizeof(vettore_punteggi)); // Inizializzo il vettore dei punteggi a NULL
     /* Creazione socket */
     sd = socket(AF_INET, SOCK_STREAM, 0);
     /* Creazione indirizzo */

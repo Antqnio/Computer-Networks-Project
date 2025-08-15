@@ -12,6 +12,7 @@
         "-Iinclude",
         "server.c",
         "src/stampa_delimitatore.c",
+        "src/gestione_ritorno_recv_send_lato_client.c",
         "-o",
         "server"
       ],

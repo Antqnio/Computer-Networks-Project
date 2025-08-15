@@ -17,7 +17,7 @@ ssize_t recv_all(int sock, void *buf, size_t len, void (*gestisci_ritorno_recv)(
         if (ret <= 0) {
             gestisci_ritorno_recv(ret, sock, errore_msg); // Errore o connessione chiusa
             if (ret == 0) {
-                return total; // Connessione chiusa
+                return 0; // Connessione chiusa
             }
         }
         // Se siamo qui, ho ricevuto 'ret' byte

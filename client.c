@@ -9,6 +9,7 @@
 #include "include/costanti.h"
 #include "include/comandi.h"
 #include "include/stampa_delimitatore.h"
+#include "include/send_recv_all.h"
 
 #define SERVER_CHIUSO 1 // Flag per indicare se il server è chiuso
 #define SERVER_APERTO 0 // Flag per indicare se il server è aperto
@@ -157,7 +158,7 @@ int main (int argc, char *argv[]) {
     int sd;
     int stato_server = SERVER_CHIUSO; // Flag per verificare se il server è chiuso.
     ssize_t ret; // Variabile per gestire i ritorni delle funzioni di invio e ricezione
-    size_t dim;
+    ssize_t dim;
     struct sockaddr_in sv_addr; // Struttura per il server
     uint32_t stato_del_nickname = NICKNAME_ERRATO; // Flag per verificare se il nickname è già registrato
     uint32_t numero_di_temi;
@@ -259,6 +260,7 @@ int main (int argc, char *argv[]) {
                 break;
             }
         }
+        
         // Se il server è chiuso, provo a riconnettermi
         if (stato_server == SERVER_CHIUSO) {
             printf("Il server è chiuso: provo a riconettermi.\n");
@@ -268,15 +270,15 @@ int main (int argc, char *argv[]) {
         // Adesso ricevo prima il numero di temi, poi i titoli dei vari temi.
         dim = sizeof(numero_di_temi);
         ret = recv_all(sd, (void*)&numero_di_temi, dim, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione del numero di temi");
-        if (ret < dim) {
+        if (ret == 0) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
             continue;
         }
         numero_di_temi = ntohl(numero_di_temi); // Converto in formato host
-        //printf("Numero di temi disponibili: %u\n", numero_di_temi);
+        printf("Numero di temi disponibili: %u\n", numero_di_temi);
         // Ora ricevo la lunghezza del buffer che contiene i temi
         ret = recv_all(sd, (void*)&dim, sizeof(dim), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della lunghezza del buffer dei temi");
-        if (ret < dim) {
+        if (ret == 0) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
             continue;
         }
@@ -307,10 +309,55 @@ int main (int argc, char *argv[]) {
                 break;
             }
             ottieni_tema_scelto(temi, scelta, tema_scelto, sizeof(tema_scelto)); // Ottieni il tema scelto
-            printf("Quiz - %s\n", tema_scelto);
+            printf("\nQuiz - %s\n", tema_scelto);
             stampa_delimitatore();
             while(1) {
+                char domanda[1024]; // Buffer per la domanda
+                char risposta[30]; // Buffer per la risposta
+                char format[50]; // Buffer per il formato di scanf
+                char risposta_server[30]; // Buffer per la risposta del server
+                char esito[DIMENSIONE_RISPOSTA]; // Buffer per l'esito della risposta
+                size_t size_scanf = 30; // Dimensione massima della risposta da leggere + 1 (per '\0)
+                int prima_iterazione = 1;
+                // Ricevo la dimensione della domanda dal server
+                uint8_t dimensione_domanda;
+                ret = recv(sd, &dimensione_domanda, sizeof(dimensione_domanda), 0);
+                gestisci_ritorno_recv_send_lato_client(ret, sd, "Errore nella ricezione della dimensione della domanda dal server");
                 // Ricevo una domanda dal server
+                printf("Dimensione della domanda: %u\n", dimensione_domanda);
+                memset(domanda, 0, sizeof(domanda)); // Inizializza il buffer della domanda
+                recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");
+                // Stampa la domanda ricevuta
+                domanda[dimensione_domanda] = '\0'; // <-- aggiungi questa riga!
+                memset(risposta, 0, sizeof(risposta)); // Inizializza il buffer della risposta
+                printf("%s\n\nRisposta: ", domanda);
+                while (strlen(risposta) == 0) {
+                    if (!prima_iterazione) {
+                        printf("Risposta non valida, riprova:\n");
+                    }
+                    fflush(stdout); // Garantisce la stampa della printf() sopra
+                    snprintf(format, sizeof(format), "%%%zus", size_scanf - 1); // Permette risposte di massimo 29 caratteri + '\0'
+                    scanf(format, risposta); // Legge il nickname
+                    // Controlla se la risposta è vuota
+                    prima_iterazione = 0; // Faccio in modo che venga stampato il messaggio di risposta non valida
+                }
+                // Invia la dimensione della risposta al server
+                uint8_t dimensione_risposta = strlen(risposta);
+                ret = send(sd, &dimensione_risposta, sizeof(dimensione_risposta), 0);
+                gestisci_ritorno_recv_send_lato_client(ret, sd, "Errore nell'invio della dimensione della risposta al server");
+                // Non serve ack per la dimensione della risposta, perché il server rappresenta
+                // la dimensione della risposta come un uint8_t, quindi non può essere > 255 o < 0.
+                // Invia la risposta al server
+                send_all(sd, (void*)risposta, strlen(risposta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della risposta al server");
+                // Ricevo l'esito della risposta dal server
+                memset(risposta_server, 0, sizeof(risposta_server));
+                recv_all(sd, (void*)risposta_server, DIMENSIONE_RISPOSTA, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dell'esito della risposta del server");
+                if (strcmp(risposta_server, "Risposta corretta") == 0) {
+
+                }
+                else /* if (strcmp(risposta_server, "Risposta errata") == 0) */ {
+                    
+                }
             }
         }
     }
