@@ -296,7 +296,7 @@ int main (int argc, char *argv[]) {
             continue;
         }
         dim_temi = ntohl(dim_temi); // Converto in formato host
-        // Ora ricevo i temi come una stringa unica, separati da '\n'.
+        // Ora ricevo i temi (o quiz) come una stringa unica, separati da '\n'.
         memset(temi, 0, sizeof(temi)); // Inizializzo il buffer dei temi
         recv_all(sd, temi, dim_temi, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dei temi");
         // A questo punto, temi contiene tutti i titoli dei temi, separati da '\n'.
@@ -311,8 +311,7 @@ int main (int argc, char *argv[]) {
             scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
             // Non serve convertire in network order perché è un uint8_t
             // Invia la scelta del tema al server
-            ret = send(sd, (void*)&scelta, sizeof(scelta), 0);
-            gestisci_ritorno_recv_send_lato_client(ret, sd, "Errore nell'invio della scelta del tema al server");
+            send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
             // Riceve l'ACK per la scelta del tema
             ack = ricevi_ack(sd, "Errore nella ricezione dello stato della scelta del tema dal server");
             if (ack == 0) {
@@ -339,7 +338,7 @@ int main (int argc, char *argv[]) {
                 uint8_t dimensione_risposta_client;
                 uint8_t dimensione_risposta_server;
                 recv_all(sd, &dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della domanda dal server");
-                printf("Dimensione della domanda: %u\n", dimensione_domanda);
+                // printf("Dimensione della domanda: %u\n", dimensione_domanda);
                 // Ricevo una domanda dal server
                 memset(domanda, 0, sizeof(domanda));
                 recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");

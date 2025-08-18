@@ -489,10 +489,10 @@ void inserisci_giocatore_quiz_completato_ricorsivo(struct Giocatore* curr, struc
 
 void inserisci_giocatore_quiz_completato(struct Giocatore* curr, struct Giocatore_Quiz** quiz_completato, pthread_mutex_t* mutex) {
     pthread_mutex_lock(mutex); // Blocca l'accesso all'albero dei quiz completati
-    printf("Inserisco il giocatore %s nell'albero dei quiz completati\n", curr->nickname);
+    // printf("Inserisco il giocatore %s nell'albero dei quiz completati\n", curr->nickname);
     inserisci_giocatore_quiz_completato_ricorsivo(curr, quiz_completato);
     pthread_mutex_unlock(mutex); // Sblocca l'accesso all'albero dei quiz
-    printf("Giocatore %s inserito nell'albero dei quiz completati\n", curr->nickname);
+    // printf("Giocatore %s inserito nell'albero dei quiz completati\n", curr->nickname);
 }
 
 
@@ -579,12 +579,12 @@ void aggiorna_punteggio_ricorsivo(struct Giocatore* curr, uint8_t quiz_scelto, u
 
 void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nuovo_punteggio) {
     pthread_mutex_lock(&mutex_punteggi[quiz_scelto - 1]); // Blocca l'accesso all'albero dei punteggi
-    printf("Aggiorno il punteggio del giocatore %s nel quiz %d con il nuovo punteggio: %d\n", curr->nickname, quiz_scelto, nuovo_punteggio);
+    // printf("Aggiorno il punteggio del giocatore %s nel quiz %d con il nuovo punteggio: %d\n", curr->nickname, quiz_scelto, nuovo_punteggio);
     // Rimuovo il giocatore prima di effettuare la ricorsione d'inserimento per evitare problemi durante la ricorsione
     // rimuovi_giocatore_da_albero(&albero_giocatori, curr); // Rimuovo il giocatore dall'albero dei giocatori
     aggiorna_punteggio_ricorsivo(curr, quiz_scelto, nuovo_punteggio);
     pthread_mutex_unlock(&mutex_punteggi[quiz_scelto - 1]); // Sblocca l'accesso all'albero dei punteggi
-    printf("Punteggio aggiornato correttamente.\n");
+    // printf("Punteggio aggiornato correttamente.\n");
 }
 
 
@@ -678,14 +678,18 @@ void* gestisci_connessione(void* arg) {
     uint8_t domanda_non_ancora_inviata = 0; // Variabile per non inviare più volte la stessa domanda al client (quando il client invia "show score" o "endquiz")
     uint32_t punteggio; // Punteggio del giocatore per il quiz
     struct Giocatore* giocatore = crea_giocatore(cl_sd);
+    int prima_iterazione = 1; // Variabile per indicare se è la prima iterazione del ciclo
     stampa_interfaccia(); // Stampa l'interfaccia grafica del server
     // A questo punto, finché il client non interrompe la connessione (a meno di errori):
-    // 1. Invia i quiz disponibili al client
+    // 1. Invia i quiz disponibili al client (solo la prima volta)
     // 2. Riceve il quiz scelto dal client
     // 3. Inizia il quiz con il client
     while(1) {
         int c = 0;
-        invia_quiz_disponibili(giocatore); // Funzione per inviare i quiz disponibili al giocatore
+        if (prima_iterazione) {
+            invia_quiz_disponibili(giocatore); // Funzione per inviare i quiz disponibili al giocatore
+            prima_iterazione = 0; // Setto a 0 per non inviare più i quiz disponibili
+        }
         quiz_scelto = ricevi_quiz_scelto(giocatore); // Funzione per ricevere il quiz scelto dal giocatore
         // Adesso il client può iniziare a giocare con il quiz scelto.
         uint32_t domande_inviate = 0; // Contatore delle domande inviate
@@ -701,7 +705,7 @@ void* gestisci_connessione(void* arg) {
         domanda_non_ancora_inviata = 1; // Setto la variabile per indicare che la domanda non è ancora stata inviata
         // Leggo le domande dal file e le invio al client
         punteggio = 0; // Resetto il punteggio per il nuovo quiz
-        while (c != EOF && domande_inviate < numero_di_quiz_disponibili) {
+        while (c != EOF && domande_inviate < DOMANDE_PER_TEMA) {
             // Invio, in ordine di scrittura, le domande del quiz scelto al client
             int i = 0;
             memset(domanda, 0, sizeof(domanda)); // Inizializzo il buffer della domanda
@@ -719,7 +723,7 @@ void* gestisci_connessione(void* arg) {
                 dimensione_domanda = i; // La dimensione della domanda è pari al numero di caratteri letti
                 send_all(cl_sd, (void*)&dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della dimensione della domanda al client");
                 // Invio la domanda al client
-                // printf("Invio domanda al client %s: %s\n", giocatore->nickname, domanda);
+                printf("Invio domanda al client %s: %s\n", giocatore->nickname, domanda);
                 send_all(cl_sd, (void*)domanda, i, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della domanda al client");
             }
             // Ricevo la dimensione della risposta dal client (tale dimensione è un uint8_t)
@@ -746,7 +750,7 @@ void* gestisci_connessione(void* arg) {
             c = fgetc(fp); // Leggo il file per scartare lo spazio tra la domanda e le risposte
             i = 0; // Resetto l'indice per la risposta
             memset(risposta_server, 0, sizeof(risposta_server)); // Inizializzo il buffer della risposta del server
-            while ((c = fgetc(fp)) != EOF) { // Leggo il file fino alla fine (la fine della risposta è segnata da un carattere '\n'. Le varie risposte valide sono separate da '|')
+            while ((c = fgetc(fp))) { // Leggo il file fino alla fine (la fine della risposta è segnata da un carattere '\n'. Le varie risposte valide sono separate da '|')
                 if (c == '|') { // Ho letto una risposta (valida) dal file
                     // Se la domanda ammette più risposte valide, le leggo una alla volta.
                     // Nel caso di più risposte valide, se la risposta letta non è l'ultima, devo togliere lo spazio finale (quello prima di '|')
@@ -763,18 +767,25 @@ void* gestisci_connessione(void* arg) {
                     c = fgetc(fp); // Leggo il prossimo carattere (per scartare lo spazio tra le risposte)
                     continue;
                 }
-                else if (c == '\n') { // Ho letto l'ultima risposta (valida) dal file per quella domanda
+                else if (c == '\n' || c == EOF) { // Ho letto l'ultima risposta (valida) dal file per quella domanda (che potrebbe essere l'ultima risposta per tutte le domande di quel file)
+                    printf("Risposta del server: %s\n", risposta_server); // Stampo la risposta del server (per debug)
                     // Sempre nel caso di più risposte valide, ora 
                     if (strcmp(risposta_client, risposta_server) == 0) {
                         // Se la risposta del client corrisponde alla risposta del server, aggiorno il punteggio
                         gestisci_risposta_corretta(giocatore, risposta_client, quiz_scelto, &punteggio);
                     } else {
+                        printf("Risposta errata del client %s: %s\n", giocatore->nickname, risposta_client);
                         invia_risposta_errata(cl_sd); // Invia un messaggio di errore al client
                     }
                     break;  // Trovato il carattere '\n', interrompe, così da passare alla prossima domanda
                 }
                 risposta_server[i++] = c; // Aggiungo il carattere al buffer della risposta
                 // printf("Risposta del server: %s\n", risposta_server); // Stampo la risposta del server
+            }
+            if (c == EOF) {
+                // Se ho raggiunto la fine del file, interrompo il ciclo
+                printf("Fine del file raggiunta per il quiz %d\n", quiz_scelto);
+                break; // Esco dal ciclo delle domande
             }
             domanda_non_ancora_inviata = 1; // Setto la variabile per la prossima domanda
             ++domande_inviate; // Incremento il contatore delle domande inviate
@@ -784,14 +795,7 @@ void* gestisci_connessione(void* arg) {
                 c = fgetc(fp);
                 // printf("Scarto carattere: %c\n", c); // Stampo il carattere scartato (per debug)
             }
-            // Salta eventuali righe vuote
-            
-            do {
-                c = fgetc(fp);
-                printf("Scarto carattere: %c\n", c); // Stampo il carattere scartato (per debug)
-            } while (c == '\n');
-            if (c == EOF) break;
-            ungetc(c, fp); // Rimetti il carattere per la prossima lettura
+
             // printf("Fine domanda %d\n", domande_inviate);
             
         }
