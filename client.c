@@ -14,11 +14,14 @@
 
 #define SERVER_CHIUSO 1 // Flag per indicare se il server è chiuso
 #define SERVER_APERTO 0 // Flag per indicare se il server è aperto
+#define QUIZ_TERMINATO 1 // Flag per indicare se il quiz è terminato
+#define QUIZ_IN_CORSO 0 // Flag per indicare se il quiz è in corso
+
+const char MESSAGGIO_SERVER_CHIUSO[] = "\nSocket lato server si è chiuso: mostro di nuovo il menù di avvio.\n\n";
 
 void gestisci_sigpipe(int sig) {
     // Usata per informare il client della chiusura del server
     (void)sig; // Sopprime il warning per parametro non usato
-    printf("Il server ha terminato la connessione\n");
 }
 
 uint8_t scelta_numerica(int min, int max) {
@@ -130,32 +133,75 @@ void gestisci_ritorno_recv_send_lato_client(int ret, int sd, const char* msg) {
     if (ret <= 0) {
         close(sd);
         if (ret == 0) {
-            printf("Socket lato server chiuso.\n");
+            printf(MESSAGGIO_SERVER_CHIUSO);
         } else {
+            printf("\n");
             perror(msg);
-            exit(EXIT_FAILURE); // Termina il client
         }
     }
 }
 
 uint8_t ricevi_ack(int sd, const char* errore_msg) {
-    // Funzione per ricevere un ACK dal server
-    // Ritorna 2 se il server è chiuso. Termina il client se c'è un errore.
+    // Funzione per ricevere un ACK dal server (che vale 0 o 1)
+    // Ritorna 2 se il server è chiuso. Ritorna 255 se c'è un errore.
     uint8_t ack;
     ssize_t ret = recv(sd, &ack, sizeof(ack), 0);
     if (ret <= 0) {
         close(sd);
         if (ret == 0) {
-            printf("Socket lato server chiuso.\n");
             return 2; // Connessione chiusa
         }
         if (ret == -1) {
             perror(errore_msg);
-            exit(EXIT_FAILURE); // Termina il client
+            return 255; // Errore nella ricezione
         }
     }
     return ack; // Ritorna l'ACK ricevuto
 }
+
+void stampa_punteggio_di_ogni_tema(const char* buffer, size_t size) {
+    // Funzione per stampare i punteggi di ogni tema
+    // Il buffer contiene gli informazioni sui punteggi dei temi, formattate come:
+    // "<numero_tema>\n<punteggio>|<nickname>\n"
+    // <numero_tema> è il numero del tema, seguito da un '\n'. Finché non si passa al prossimo tema,
+    // non si troveranno altri '<numero_tema>\n'.
+    printf("\n");
+    const char* start = buffer;
+    char *prossimo_newline = (char*)start, *prossimo_pipe; // Inizializzo prossimo_newline per poter entrare nel while
+    while (prossimo_newline != NULL && start < buffer + size) {
+        // Appena entro, trovo il primo numero di tema
+        prossimo_newline = strchr(start, '\n'); // Trovo il prossimo '\n' (quello che segna il numero del tema)
+        printf("Punteggio tema %.*s\n", (int)(prossimo_newline - start), start);
+        // A questo punto, il prossimo carattere dopo il '\n' sarà il primo punteggio
+        start += 2; // Passo al prossimo carattere dopo '\n'
+        // A questo punto, devo stampare i giocatori con i rispettivi punteggi
+        // Ho giocatori finché non trovo un '\n' che non è seguito da '|'
+        // Quindi, mi basta vedere se, rispetto a start, è più vicino un '\n' o un '|'
+        // - Se è più vicino un '\n', allora ho finito di stampare i giocatori per questo tema, quindi ho trovato un numero di tema
+        // - Se è più vicino un '|', allora ho trovato il punteggio di un giocatore
+        prossimo_newline = strchr(start, '\n'); // Trovo il prossimo '\n'
+        prossimo_pipe = strchr(start, '|'); // Trovo il prossimo '|'
+        while (prossimo_newline != NULL && prossimo_pipe != NULL && prossimo_pipe < prossimo_newline) {
+            // Se il prossimo '|' è prima del prossimo '\n', allora
+            // ho trovato un giocatore con il suo punteggio
+            // Quindi, stampo il punteggio e il nickname del giocatore
+            char punteggio[8];
+            memset(punteggio, 0, sizeof(punteggio)); // Inizializzo il buffer del punteggio
+            strncpy(punteggio, start, (size_t)(prossimo_pipe - start)); // Copio il punteggio
+            prossimo_newline = strchr(prossimo_pipe + 1, '\n'); // Trovo il prossimo '\n' dopo il '|'
+            printf("- %.*s %s\n", 
+                (int)(prossimo_newline - (prossimo_pipe + 1)), // Lunghezza nickname
+                prossimo_pipe + 1, // Nickname
+                punteggio // Punteggio
+            );
+            start = prossimo_newline + 1; // Passo al prossimo carattere dopo '|'
+            prossimo_newline = strchr(start, '\n'); // Trovo il prossimo '\n'
+            prossimo_pipe = strchr(start, '|'); // Trovo il prossimo '|'
+        }
+    }
+    printf("\n");
+}
+
 
 int main (int argc, char *argv[]) {
     char scelta; // Variabile per la scelta del menu iniziale e del tema di gioco
@@ -194,6 +240,8 @@ int main (int argc, char *argv[]) {
         // Finché il client non esegue Ctrl+C, continuerà a provare a connettermi al server.
         ret = -1; // Inizializza ret a -1 per entrare nel while
         while(ret == -1) {
+            stato_del_nickname = NICKNAME_ERRATO; // Reset del flag per il nickname errato
+            stato_server = SERVER_CHIUSO; // Reset del flag per il server chiuso
             /* Creazione socket */
             sd = socket(AF_INET, SOCK_STREAM, 0);
             /* Creazione indirizzo del server */
@@ -227,9 +275,10 @@ int main (int argc, char *argv[]) {
             // 1. Invia la lunghezza del nickname (quindi quanti byte il server si aspetta)
             dim = sizeof(lunghezza_nickname_net);
             ret = send_all(sd, (void*)&lunghezza_nickname_net, dim, gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della lunghezza del nickname al server");
-            if (ret == 0) {
-                // // Se ret == -1, significa che c'è stato un errore nell'invio, ma questo caso è già gestito dalla funzione send_all
-                // // Quindi, se ret < dim, significa che non ho inviato tutti i byte che mi aspettavo, quindi che il socket lato server è chiuso
+            if (ret == 0 || ret == -1) {
+                // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                // e provo a riconnettermi
                 stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
                 break; // Esco dal ciclo
             }
@@ -240,8 +289,9 @@ int main (int argc, char *argv[]) {
                 printf("Lunghezza nickname non valida\n");
                 continue; // Riprovo a inserire il nickname
             }
-            else if (ack == 2) {
+            else if (ack == 2 || ack == 255) {
                 // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
+                // Se ack == 255, significa che c'è stato un errore nella ricezione dell'ACK, quindi esco dal ciclo
                 stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
                 break;
             }
@@ -249,7 +299,10 @@ int main (int argc, char *argv[]) {
             // 3. Invia il nickname al server
             dim = lunghezza_nickname;
             ret = send_all(sd, (void*)nickname, dim, gestisci_ritorno_recv_send_lato_client, "Errore nell'invio del nickname al server");
-            if (ret == 0) {
+            if (ret == 0 || ret == -1) {
+                // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                // e provo a riconnettermi
                 stato_server = SERVER_CHIUSO;
                 break;
             }
@@ -264,8 +317,9 @@ int main (int argc, char *argv[]) {
                 printf("Nickname già registrato: per favore, prova a usarne un altro\n");
                 continue; // Riprovo a inserire il nickname
             }
-            else if (ack == 2) {
+            else /* if (ack == 2 || ack == -1) */ {
                 // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
+                // Se ack == -1, significa che c'è stato un errore nella ricezione dell'ACK, quindi esco dal ciclo
                 stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
                 break;
             }
@@ -273,24 +327,22 @@ int main (int argc, char *argv[]) {
         
         // Se il server è chiuso, provo a riconnettermi
         if (stato_server == SERVER_CHIUSO) {
-            printf("Il server è chiuso: provo a riconettermi.\n");
-            close(sd);
+            printf("%s", MESSAGGIO_SERVER_CHIUSO);
             continue; // Ritorno all'inizio del ciclo per riconnettermi
         }
         printf("\n");
         
         // Adesso ricevo prima il numero di temi
         ret = recv_all(sd, (void*)&numero_di_temi, sizeof(numero_di_temi), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione del numero di temi");
-        if (ret == 0) {
+        if (ret == 0 || ret == -1) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
-            close(sd);
             continue;
         }
         numero_di_temi = ntohl(numero_di_temi); // Converto in formato host
         printf("Numero di temi disponibili: %u\n", numero_di_temi);
         // Ora ricevo la lunghezza del buffer che contiene i temi
         ret = recv_all(sd, (void*)&dim_temi, sizeof(dim_temi), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della lunghezza del buffer dei temi");
-        if (ret == 0) {
+        if (ret == 0 || ret == -1) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
             close(sd);
             continue;
@@ -298,11 +350,13 @@ int main (int argc, char *argv[]) {
         dim_temi = ntohl(dim_temi); // Converto in formato host
         // Ora ricevo i temi (o quiz) come una stringa unica, separati da '\n'.
         memset(temi, 0, sizeof(temi)); // Inizializzo il buffer dei temi
-        recv_all(sd, temi, dim_temi, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dei temi");
+        ret = recv_all(sd, temi, dim_temi, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dei temi");
         // A questo punto, temi contiene tutti i titoli dei temi, separati da '\n'.
         // Ora scelgo un tema e lo invio al server.
         while(1) {
             uint8_t ack;
+            uint8_t stato_quiz = QUIZ_IN_CORSO; // Flag per indicare se il quiz è terminato
+            uint8_t domanda_non_ancora_ricevuta = 1; // Variabile per indicare se la domanda non è ancora stata ricevuta
             int c; // Usato per svuotare il buffer dello stdin
             int domande_ricevute = 0; // Contatore delle domande ricevute
             char tema_scelto[1024]; // Buffer per il tema scelto
@@ -311,15 +365,23 @@ int main (int argc, char *argv[]) {
             scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
             // Non serve convertire in network order perché è un uint8_t
             // Invia la scelta del tema al server
-            send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
+            ret = send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
+            if (ret == 0 || ret == -1) {
+                // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                // e provo a riconnettermi
+                stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                break;
+            }
             // Riceve l'ACK per la scelta del tema
             ack = ricevi_ack(sd, "Errore nella ricezione dello stato della scelta del tema dal server");
             if (ack == 0) {
                 printf("Tema scelto non valido: riprova:\n");
                 continue; // Riprovo a inserire il nickname
             }
-            else if (ack == 2) {
+            else if (ack == 2 || ack == 255) {
                 // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
+                // Se ack == -1, significa che c'è stato un errore nella ricezione dell'ACK, quindi esco dal ciclo
                 stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
                 break;
             }
@@ -332,17 +394,33 @@ int main (int argc, char *argv[]) {
                 char risposta_client[30]; // Buffer per la risposta
                 char risposta_server[30]; // Buffer per la risposta del server
                 size_t lunghezza_massima_risposta = 30; // Dimensione massima della risposta da leggere + 1 (per '\0)
-                int prima_iterazione = 1;
+                int prima_iterazione = 1; // Variabile per indicare se è la prima iterazione del ciclo do while sotto
                 // Ricevo la dimensione della domanda dal server
                 uint8_t dimensione_domanda;
                 uint8_t dimensione_risposta_client;
                 uint8_t dimensione_risposta_server;
-                recv_all(sd, &dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della domanda dal server");
-                // printf("Dimensione della domanda: %u\n", dimensione_domanda);
-                // Ricevo una domanda dal server
-                memset(domanda, 0, sizeof(domanda));
-                recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");
-                // Stampa la domanda ricevuta e il prompt per la risposta)
+                if (domanda_non_ancora_ricevuta) {
+                    ret = recv_all(sd, &dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della domanda dal server");
+                    if (ret == 0 || ret == -1) {
+                        // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                        // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                        // e provo a riconnettermi
+                        stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                        break;
+                    }
+                    // printf("Dimensione della domanda: %u\n", dimensione_domanda);
+                    // Ricevo una domanda dal server
+                    memset(domanda, 0, sizeof(domanda));
+                    ret = recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");
+                    if (ret == 0 || ret == -1) {
+                        // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                        // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                        // e provo a riconnettermi
+                        stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                        break;
+                    }
+                    // Stampa la domanda ricevuta e il prompt per la risposta)
+                }
                 printf("%s\n\nRisposta: ", domanda);
                 // Leggo la risposta da tastiera
                 memset(risposta_client, 0, sizeof(risposta_client));
@@ -366,27 +444,108 @@ int main (int argc, char *argv[]) {
                 
                 // Invia la dimensione della risposta al server
                 dimensione_risposta_client = strlen(risposta_client);
-                send_all(sd, &dimensione_risposta_client, sizeof(dimensione_risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della dimensione della risposta al server");
+                ret = send_all(sd, &dimensione_risposta_client, sizeof(dimensione_risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della dimensione della risposta al server");
+                    if (ret == 0 || ret == -1) {
+                    // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                    // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                    // e provo a riconnettermi
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    break;
+                }
                 // printf("Dimensione della risposta: %u\n", dimensione_risposta_client);
                 // Non serve ack per la dimensione della risposta, perché il server rappresenta
                 // la dimensione della risposta come un uint8_t, quindi non può essere > 255 o < 0.
                 // Invia la risposta al server
                 // printf("Risposta inviata: %s\n", risposta_client);
-                send_all(sd, (void*)risposta_client, strlen(risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della risposta al server");
-                
+                ret = send_all(sd, (void*)risposta_client, strlen(risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della risposta al server");
+                if (ret == 0 || ret == -1) {
+                    // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                    // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                    // e provo a riconnettermi
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    break;
+                }
+                if (strcmp(risposta_client, "endquiz") == 0) {
+                    // Se il client invia "endquiz", il server chiude la connessione
+                    uint8_t ack = ricevi_ack(sd, "Errore nella ricezione dell'ACK per la fine del quiz");
+                    if (ack == 0) {
+                        // In realtà non dovrebbe mai arrivare qui, perché il server non dovrebbe inviare un ACK negativo per "endquiz"
+                        printf("Quiz terminato dal server.\n");
+                    }
+                    else if (ack == 2) {
+                        // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
+                        stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    }
+                    else /* if (ack == 1) */ {
+                        printf("Quiz terminato dal client.\n");   
+                        stato_quiz = QUIZ_TERMINATO; // Segno che il quiz è terminato
+                    }
+                    printf("\n");
+                    break; // Esco dal ciclo delle domande
+                }
+                if (strcmp(risposta_client, "show score") == 0) {
+                    // Se il client invia "show score", il server invia il punteggio di ogni tema
+                    // Ricevo la dimensione della stringa
+                    uint32_t dimensione_risposta_server;
+                    ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della risposta del server");
+                    if (ret == 0 || ret == -1) {
+                        // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                        // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                        // e provo a riconnettermi
+                        stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                        break;
+                    }
+                    dimensione_risposta_server = ntohl(dimensione_risposta_server); // Converto in formato host
+                    // Ricevo la risposta del server (il punteggio di ogni tema con relativi nickname)
+                    memset(risposta_server, 0, sizeof(risposta_server));
+                    ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della risposta del server");
+                    if (ret == 0 || ret == -1) {
+                        // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                        // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                        // e provo a riconnettermi
+                        stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                        break;
+                    }
+                    risposta_server[dimensione_risposta_server] = '\0'; // Aggiungo il terminatore alla risposta del server
+                    stampa_punteggio_di_ogni_tema(risposta_server, dimensione_risposta_server); // Stampa i punteggi dei temi
+                    domanda_non_ancora_ricevuta = 0; // Segno che il client ha già ricevuto la domanda
+                    continue; // Ritorno all'inizio del ciclo per ricevere una nuova domanda
+                }
                 // Ricevo la dimensione della risposta dal server
-                recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della risposta dal server");
+                ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della risposta dal server");
+                if (ret == 0 || ret == -1) {
+                    // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                    // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                    // e provo a riconnettermi
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    break;
+                }
                 // printf("Dimensione della risposta del server: %u\n", dimensione_risposta_server);
                 // Ricevo la risposta dal server (contenente l'esito della risposta)
                 memset(risposta_server, 0, sizeof(risposta_server));
-                recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dell'esito della risposta del server");
+                ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dell'esito della risposta del server");
+                if (ret == 0 || ret == -1) {
+                    // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                    // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                    // e provo a riconnettermi
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    break;
+                }
                 risposta_server[dimensione_risposta_server] = '\0'; // Aggiungo il terminatore alla risposta del server
                 printf("%s\n\n", risposta_server);
                 ++domande_ricevute;
+                domanda_non_ancora_ricevuta = 1; // Segno che il client dovrà ricevere una nuova domanda
+            }
+            if (stato_server == SERVER_CHIUSO || stato_quiz == QUIZ_TERMINATO) {
+                break; // Esco dal ciclo delle domande
             }
         }
         if (stato_server == SERVER_CHIUSO) {
-            printf("Il server è chiuso: riconnettersi.\n");
+            printf("%s", MESSAGGIO_SERVER_CHIUSO);
+            continue; // Ritorno all'inizio del ciclo per riconnettermi. Evito di fare close(sd) perché il socket è già chiuso
+            // Infatti, setto stato_server a SERVER_CHIUSO quando ricevo un ACK negativo (con la
+            // ricevi_ack()) o si chiama gestisci_ritorno_recv_send_lato_client() con ret == 0 o -1.
+            // Entrambe le funzioni già chiudono il socket.
         }
         close(sd); // Chiudo il socket
     }

@@ -331,7 +331,7 @@ void gestisci_ritorno_recv_send_lato_server(int ret, int sd, const char* msg) {
     // Funzione per gestire il ritorno di recv
     if (ret <= 0) {
         if (ret == 0) {
-            printf("Socket lato client chiuso.\n");
+            printf("Socket %d lato client chiuso.\n", sd);
         } else {
             perror(msg);
         }
@@ -523,52 +523,41 @@ void aggiorna_punteggio_ricorsivo(struct Giocatore* curr, uint8_t quiz_scelto, u
         // e, a parità di punteggio, in ordine alfabetico di nickname.
         struct Punteggio* curr_p = vettore_punteggi[quiz_scelto - 1];
         while (1) {
-            if (strcmp(curr->nickname, curr_p->giocatore->nickname) == 0) {
-                // Se il giocatore è già presente, incrementa il punteggio.
-                // Per farlo, cancello il nodo corrente e creo un nuovo nodo con il punteggio incrementato.
-                // Devo fare così, altrimenti romperei l'ordinamento.
-                // Chiamo la versione ricorsiva perché ho già il mutex bloccato, quindi non devo bloccarlo di nuovo.
-                rimuovi_giocatore_da_punteggi_ricorsivo(&vettore_punteggi[quiz_scelto - 1], curr);
-                aggiorna_punteggio_ricorsivo(curr, quiz_scelto, nuovo_punteggio);
-                return;
+            if (curr_p->punteggio < nuovo_punteggio) {
+                // Se il punteggio del giocatore corrente è minore del nuovo punteggio,
+                // inserisco il nuovo giocatore prima di curr_p.
+                if (curr_p->left == NULL) {
+                    curr_p->left = crea_punteggio(curr, nuovo_punteggio);; // Inserisco a sinistra
+                    return;
+                } else {
+                    curr_p->right = crea_punteggio(curr, nuovo_punteggio);; // Inserisco a destra
+                    return;
+                }
+            } else if (curr_p->punteggio > nuovo_punteggio) {
+                // Altrimenti, continuo a cercare nel sottoalbero destro
+                if (curr_p->right == NULL) {
+                    curr_p->right = crea_punteggio(curr, nuovo_punteggio);
+                    return;
+                }
+                curr_p = curr_p->right; // Scendo nel sottoalbero destro
             }
             else {
-                if (curr_p->punteggio < nuovo_punteggio) {
-                    // Se il punteggio del giocatore corrente è minore del nuovo punteggio,
-                    // inserisco il nuovo giocatore prima di curr_p.
+                // Se il punteggio è uguale, inserisco in ordine alfabetico di nickname
+                if (strcmp(curr->nickname, curr_p->giocatore->nickname) < 0) {
+                    // Se il nickname del giocatore corrente è "minore", inserisco a sinistra
                     if (curr_p->left == NULL) {
-                        curr_p->left = crea_punteggio(curr, nuovo_punteggio);; // Inserisco a sinistra
+                        curr_p->left = crea_punteggio(curr, nuovo_punteggio);
                         return;
                     } else {
-                        curr_p->right = crea_punteggio(curr, nuovo_punteggio);; // Inserisco a destra
-                        return;
+                        curr_p = curr_p->left; // Scendo nel sottoalbero sinistro
                     }
-                } else if (curr_p->punteggio > nuovo_punteggio) {
-                    // Altrimenti, continuo a cercare nel sottoalbero destro
+                } else {
+                    // Altrimenti, inserisco a destra
                     if (curr_p->right == NULL) {
                         curr_p->right = crea_punteggio(curr, nuovo_punteggio);
                         return;
-                    }
-                    curr_p = curr_p->right; // Scendo nel sottoalbero destro
-                }
-                else {
-                    // Se il punteggio è uguale, inserisco in ordine alfabetico di nickname
-                    if (strcmp(curr->nickname, curr_p->giocatore->nickname) < 0) {
-                        // Se il nickname del giocatore corrente è "minore", inserisco a sinistra
-                        if (curr_p->left == NULL) {
-                            curr_p->left = crea_punteggio(curr, nuovo_punteggio);
-                            return;
-                        } else {
-                            curr_p = curr_p->left; // Scendo nel sottoalbero sinistro
-                        }
                     } else {
-                        // Altrimenti, inserisco a destra
-                        if (curr_p->right == NULL) {
-                            curr_p->right = crea_punteggio(curr, nuovo_punteggio);
-                            return;
-                        } else {
-                            curr_p = curr_p->right; // Scendo nel sottoalbero destro
-                        }
+                        curr_p = curr_p->right; // Scendo nel sottoalbero destro
                     }
                 }
             }
@@ -581,7 +570,16 @@ void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nu
     pthread_mutex_lock(&mutex_punteggi[quiz_scelto - 1]); // Blocca l'accesso all'albero dei punteggi
     // printf("Aggiorno il punteggio del giocatore %s nel quiz %d con il nuovo punteggio: %d\n", curr->nickname, quiz_scelto, nuovo_punteggio);
     // Rimuovo il giocatore prima di effettuare la ricorsione d'inserimento per evitare problemi durante la ricorsione
-    // rimuovi_giocatore_da_albero(&albero_giocatori, curr); // Rimuovo il giocatore dall'albero dei giocatori
+    // Infatti, l'albero dei punteggi è ordinato in ordine di punteggio e, solo a parità di punteggio, in ordine alfabetico di nickname.
+    // Quindi, se il giocatore è già presente, devo rimuoverlo prima di inserirlo con il nuovo punteggio, visto che la
+    // ricerca del giocatore avviene per punteggio, e non per nickname
+    // Se il giocatore è già presente, ovviamente ne incremento il punteggio.
+    // Per farlo, cancello il nodo associato a tale giocatore e creo un nuovo nodo con il punteggio incrementato.
+    // Devo fare così, altrimenti romperei l'ordinamento.
+    if (nuovo_punteggio > 1) {
+        // Se il nuovo punteggio è maggiore di 1, il giocatore era già presente nell'albero dei punteggi, quindi lo rimuovo
+        rimuovi_giocatore_da_punteggi_ricorsivo(&vettore_punteggi[quiz_scelto - 1], curr);
+    }
     aggiorna_punteggio_ricorsivo(curr, quiz_scelto, nuovo_punteggio);
     pthread_mutex_unlock(&mutex_punteggi[quiz_scelto - 1]); // Sblocca l'accesso all'albero dei punteggi
     // printf("Punteggio aggiornato correttamente.\n");
@@ -591,14 +589,13 @@ void aggiorna_punteggio(struct Giocatore* curr, uint8_t quiz_scelto, uint32_t nu
 
 
 
-void crea_stringa_punteggio(int sd, struct Punteggio* punteggio, char* buffer, uint32_t buf_size, char* start) {
+void crea_stringa_punteggio(struct Punteggio* punteggio, char* buffer, uint32_t buf_size, char* start) {
     // Funzione per inviare il punteggio al client
-    // Invia il punteggio del giocatore al client in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
+    // Invia il punteggio del quiz al client in ordine di punteggio e, a parità di punteggio, in ordine alfabetico di nickname
     if (punteggio == NULL) {
         return; // Se il punteggio è NULL, non invio nulla
     }
-    uint32_t punteggio_net = htonl(punteggio->punteggio); // Converto il punteggio in formato di rete
-    crea_stringa_punteggio(sd, punteggio->left, buffer, buf_size, start); // Invia il punteggio del sottoalbero sinistro
+    crea_stringa_punteggio(punteggio->left, buffer, buf_size, start); // Invia il punteggio del sottoalbero sinistro
 
     // Salva il punteggio
     snprintf(buffer + *start, buf_size, "%d|",  punteggio->punteggio);
@@ -606,11 +603,7 @@ void crea_stringa_punteggio(int sd, struct Punteggio* punteggio, char* buffer, u
     snprintf(buffer + *start + strlen(buffer + *start), buf_size - *start, "%s\n", punteggio->giocatore->nickname);
     *start += strlen(buffer + *start); // Aggiorna l'indice di partenza per il prossimo punteggio
 
-
-    send_all(sd, (void*)&punteggio_net, sizeof(punteggio_net), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio del punteggio al client");
-    // Invia il nickname del giocatore
-    send_all(sd, (void*)punteggio->giocatore->nickname, strlen(punteggio->giocatore->nickname) + 1, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio del nickname del giocatore al client");
-    crea_stringa_punteggio(sd, punteggio->right, buffer, buf_size, start); // Invia il punteggio del sottoalbero destro
+    crea_stringa_punteggio(punteggio->right, buffer, buf_size, start); // Invia il punteggio del sottoalbero destro
 }
 
 void invia_punteggio_di_ogni_tema(int sd) {
@@ -618,22 +611,24 @@ void invia_punteggio_di_ogni_tema(int sd) {
     // Per ogni tema, invia una stringa col seguente formato:
     // "<numero_tema>\n<punteggio>|<nickname>\n"
     // Per capire se ho un numero_tema o un punteggio con nickname, basta vedere se nella riga ho un '|'
+    // Finché non si passa al prossimo tema, non aggiungerò altri <numero_tema>\n
     char buffer[1024];
     char start = 0;
+    uint32_t lunghezza_buffer; // Lunghezza del buffer da inviare al client
     memset(buffer, 0, sizeof(buffer)); // Inizializza il buffer
     for (uint8_t i = 0; i < numero_di_quiz_disponibili; ++i) {
         if (vettore_punteggi[i] == NULL) {
-            continue; // Se non ci sono punteggi per questo tema, salta
+            continue; // Se non ci sono punteggi per questo tema (quindi nessun giocatore ha ancora risposto a domande di questo quiz), salta
         }
         snprintf(buffer + start, sizeof(buffer) - start, "%d\n", i + 1); // Aggiungo il numero del tema
         start += strlen(buffer + start); // Aggiorno l'indice di partenza
-        crea_stringa_punteggio(sd, vettore_punteggi[i], buffer, sizeof(buffer), &start); // Invia i punteggi del tema al client
-        // Invio la lunghezza della stringa al client
-        uint32_t lunghezza_buffer = htonl(strlen(buffer)); // Converto la lunghezza in formato di rete
-        send_all(sd, (void*)&lunghezza_buffer, sizeof(lunghezza_buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei punteggi al client");
-        // Invio la stringa al client                  
-        send_all(sd, (void*)buffer, strlen(buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei punteggi del tema al client");
+        crea_stringa_punteggio(vettore_punteggi[i], buffer, sizeof(buffer), &start); // Aggiungo i punteggi (con i rispettivi nickname) del tema corrente al buffer
     }
+    // Invio la lunghezza della stringa al client
+    lunghezza_buffer = htonl(strlen(buffer)); // Converto la lunghezza in formato di rete
+    send_all(sd, (void*)&lunghezza_buffer, sizeof(lunghezza_buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei punteggi al client");
+    // Invio la stringa al client                  
+    send_all(sd, (void*)buffer, strlen(buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei punteggi del tema al client");
 }
 
 void invia_risposta(int sd, const char* risposta) {
@@ -732,7 +727,6 @@ void* gestisci_connessione(void* arg) {
             // Ricevo la risposta del client
             memset(risposta_client, 0, sizeof(risposta_client)); // Inizializzo il buffer della risposta
             recv_all(cl_sd, (void*)risposta_client, dimensione_risposta, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della risposta dal client");
-            string_to_lower(risposta_client); // Converto la risposta del client in minuscolo
             // printf("Ricevuta risposta dal client %s: %s\n", giocatore->nickname, risposta_client);
             if (strcmp(risposta_client, "show score") == 0) {
                 invia_punteggio_di_ogni_tema(cl_sd);
@@ -741,12 +735,14 @@ void* gestisci_connessione(void* arg) {
             }
             if (strcmp(risposta_client, "endquiz") == 0) {
                 invia_ack(cl_sd, 1); // Invia un ACK per terminare il quiz
+                printf("Il client %s ha terminato il gioco\n\n", giocatore->nickname);
                 elimina_giocatore(giocatore); // Elimina il giocatore dalla lista
                 stampa_interfaccia(); // Stampa l'interfaccia aggiornata
                 fclose(fp); // Chiudo il file
                 close(cl_sd); // Chiudo il socket del client
                 pthread_exit(NULL); // Termina il thread
             }
+            string_to_lower(risposta_client); // Converto la risposta del client in minuscolo
             c = fgetc(fp); // Leggo il file per scartare lo spazio tra la domanda e le risposte
             i = 0; // Resetto l'indice per la risposta
             memset(risposta_server, 0, sizeof(risposta_server)); // Inizializzo il buffer della risposta del server

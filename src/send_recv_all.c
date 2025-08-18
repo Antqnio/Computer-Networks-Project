@@ -7,7 +7,7 @@
 
 /**
  * Funzione per leggere esattamente 'len' byte da un socket.
- * Ritorna il numero di byte letti o -1 su errore.
+ * Ritorna 0 se il socket si è chiuso o -1 su errore.
  */
 ssize_t recv_all(int sock, void *buf, size_t len, void (*gestisci_ritorno_recv)(int, int, const char*), const char* errore_msg) {
     size_t total = 0;
@@ -19,6 +19,9 @@ ssize_t recv_all(int sock, void *buf, size_t len, void (*gestisci_ritorno_recv)(
             if (ret == 0) {
                 return 0; // Connessione chiusa
             }
+            else /* if (ret == -1)*/ {
+                return -1; // Errore
+            }
         }
         // Se siamo qui, ho ricevuto 'ret' byte
         total += ret;
@@ -28,7 +31,7 @@ ssize_t recv_all(int sock, void *buf, size_t len, void (*gestisci_ritorno_recv)(
 
 /**
  * Funzione per inviare esattamente 'len' byte su un socket.
- * Ritorna il numero di byte inviati o -1 su errore.
+  * Ritorna 0 se il socket si è chiuso o -1 su errore.
  */
 ssize_t send_all(int sock, const void *buf, size_t len, void (*gestisci_ritorno_send)(int, int, const char*), const char* errore_msg) {
     size_t total = 0;
