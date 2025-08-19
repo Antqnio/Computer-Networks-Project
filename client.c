@@ -354,37 +354,40 @@ int main (int argc, char *argv[]) {
         // A questo punto, temi contiene tutti i titoli dei temi, separati da '\n'.
         // Ora scelgo un tema e lo invio al server.
         while(1) {
-            uint8_t ack;
+            uint8_t ack = 0;
             uint8_t stato_quiz = QUIZ_IN_CORSO; // Flag per indicare se il quiz è terminato
             uint8_t domanda_non_ancora_ricevuta = 1; // Variabile per indicare se la domanda non è ancora stata ricevuta
             int c; // Usato per svuotare il buffer dello stdin
             int domande_ricevute = 0; // Contatore delle domande ricevute
             char tema_scelto[1024]; // Buffer per il tema scelto
             stampa_menu_temi(temi, numero_di_temi); // Stampa il menu dei temi
-            printf("La tua scelta: ");
-            scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
-            // Non serve convertire in network order perché è un uint8_t
-            // Invia la scelta del tema al server
-            ret = send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
-            if (ret == 0 || ret == -1) {
-                // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
-                // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
-                // e provo a riconnettermi
-                stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
-                break;
+            while (ack != 1 && ack != 2 && ack != 255) {
+                printf("La tua scelta: ");
+                scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
+                // Non serve convertire in network order perché è un uint8_t
+                // Invio la scelta del tema al server
+                ret = send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
+                if (ret == 0 || ret == -1) {
+                    // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
+                    // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
+                    // e provo a riconnettermi
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                    break;
+                }
+                // Riceve l'ACK per la scelta del tema
+                ack = ricevi_ack(sd, "Errore nella ricezione dello stato della scelta del tema dal server");
+                if (ack == 0) {
+                    printf("Tema scelto già giocato: riprova\n");  // Riprovo a inserire il nickname
+                }
+                else if (ack == 2 || ack == 255) {
+                    // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
+                    // Se ack == -1, significa che c'è stato un errore nella ricezione dell'ACK, quindi esco dal ciclo
+                    stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
+                }
             }
-            // Riceve l'ACK per la scelta del tema
-            ack = ricevi_ack(sd, "Errore nella ricezione dello stato della scelta del tema dal server");
-            if (ack == 0) {
-                printf("Tema scelto non valido: riprova:\n");
-                continue; // Riprovo a inserire il nickname
-            }
-            else if (ack == 2 || ack == 255) {
-                // Se ack == 2, significa che il server è chiuso, quindi esco dal ciclo
-                // Se ack == -1, significa che c'è stato un errore nella ricezione dell'ACK, quindi esco dal ciclo
-                stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
-                break;
-            }
+            if (stato_server == SERVER_CHIUSO) {
+                break; // Esco dal ciclo per riconnettermi
+            }            
             ottieni_tema_scelto(temi, scelta, tema_scelto, sizeof(tema_scelto)); // Ottieni il tema scelto
             printf("\nQuiz - %s\n", tema_scelto);
             stampa_delimitatore();
