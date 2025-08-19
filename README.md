@@ -1,4 +1,4 @@
-# Trivia Quiz - Progetto Reti
+# Trivia Quiz - Progetto di Reti Informatiche
 
 ## Descrizione
 
@@ -71,13 +71,13 @@ Questo comando:
 
 - Puoi avviare più client contemporaneamente.
 - Il server gestisce la classifica e la sincronizzazione dei punteggi.
-- Per modificare quiz e domande, aggiorna i file di configurazione (se previsti).
+- Per modificare quiz e domande, aggiorna i file di configurazione.
 
 ---
 
 ## Autori
 
-- [Il tuo nome o gruppo]
+- Antonio Querci
 
 ---
 
