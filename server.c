@@ -49,7 +49,7 @@ struct Quiz_Completato {
 
 struct Giocatore* albero_giocatori = NULL; // Lista dei giocatori connessi
 struct Punteggio** vettore_punteggi = NULL; // Vettore dei punteggi per ogni quiz
-struct Quiz_Completato** quiz_completati =  NULL; // Vettore dei quiz completati
+struct Quiz_Completato** quiz_completati =  NULL; // Vettore contenente gli alberi dei quiz completati
 
 //const char QUIZ_DISPONIBILI[numero_di_quiz_disponibili][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Cinema", "Arte"};
 uint32_t numero_di_quiz_disponibili = 0; // Numero di quiz disponibili
