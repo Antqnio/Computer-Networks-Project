@@ -941,7 +941,6 @@ int main () {
     socklen_t len;
     pthread_t thread_id;
     struct sockaddr_in my_addr, cl_addr;
-    stampa_interfaccia(); // Funzione per stampare l'interfaccia grafica
     /* Creazione socket */
     sd = socket(AF_INET, SOCK_STREAM, 0);
     /* Creazione indirizzo */
@@ -961,7 +960,8 @@ int main () {
     }
     len = sizeof(cl_addr);
     pthread_mutex_init(&mutex_albero_giocatori, NULL); // Inizializzo il mutex per la mutua esclusione dell'albero dei giocatori
-    ottieni_quiz_disponibili(); // Funzione per ottenere i quiz disponibili
+    ottieni_quiz_disponibili(); // Ottengo dinamicamente i quiz disponibli leggendo dal file "quiz/info.txt"
+    stampa_interfaccia(); // Stampo, adesso, l'interfaccia (solo dopo aver ottenuto i quiz)
     while(1) {
         int *cl_sd = malloc(sizeof(int)); // Alloco memoria per il socket del client (lo metto sullo heap per poterlo passare al thread)
         if (cl_sd == NULL) {
