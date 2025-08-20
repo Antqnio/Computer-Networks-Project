@@ -967,18 +967,16 @@ int main () {
         if (cl_sd == NULL) {
             perror("Errore nella malloc");
             close(*cl_sd);
-            exit(EXIT_FAILURE);
         }
         *cl_sd = accept(sd, (struct sockaddr*)&cl_addr, &len);
         if (*cl_sd < 0) {
             perror("Errore nell'accept");
-            exit(EXIT_FAILURE);
+            free(cl_sd);
         }
         ret = pthread_create(&thread_id, NULL, gestisci_connessione, (void*)cl_sd);
         if (ret != 0) {
             perror("Errore nella creazione del thread");
             free(cl_sd);
-            exit(EXIT_FAILURE);
         }
         
     }
