@@ -2,8 +2,8 @@ CC = gcc
 CFLAGS = -Wall -Wextra -pthread
 INCLUDE = -Iinclude
 
-SERVER_SRC = server.c src/send_recv_all.c src/stampa_delimitatore.c
-CLIENT_SRC = client.c src/send_recv_all.c src/stampa_delimitatore.c
+SERVER_SRC = server.c src/send_recv_all.c src/stampa_delimitatore.c src/gestisci_sigpipe.c
+CLIENT_SRC = client.c src/send_recv_all.c src/stampa_delimitatore.c src/gestisci_sigpipe.c
 
 SERVER_OBJ = $(SERVER_SRC:.c=.o)
 CLIENT_OBJ = $(CLIENT_SRC:.c=.o)

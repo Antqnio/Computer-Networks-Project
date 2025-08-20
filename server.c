@@ -8,14 +8,17 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <signal.h>
 #include "include/costanti.h"
 #include "include/stampa_delimitatore.h"
 #include "include/send_recv_all.h"
+#include "include/gestisci_sigpipe.h"
 
 
 #define PORTA 4242
 #define BACKLOG_SIZE 10
 #define LUNGHEZZA_MASSIMA_QUIZ 10
+
 
 const char RISPOSTA_CORRETTA[] = "Risposta corretta";
 const char RISPOSTA_ERRATA[] = "Risposta errata";
@@ -53,6 +56,8 @@ struct Quiz_Completato** quiz_completati =  NULL; // Vettore contenente gli albe
 //const char QUIZ_DISPONIBILI[numero_di_quiz_disponibili][LUNGHEZZA_MASSIMA_QUIZ] = {"Geografia", "Storia", "Sport", "Cinema", "Arte"};
 uint32_t numero_di_quiz_disponibili = 0; // Numero di quiz disponibili
 char** quiz_disponibili;
+
+
 
 int ottieni_partecipanti(struct Giocatore* curr) {
     // Funzione per ottenere il numero di partecipanti
@@ -784,7 +789,7 @@ void* gestisci_connessione(void* arg) {
                 stampa_interfaccia(); // Stampa l'interfaccia aggiornata
                 fclose(fp); // Chiudo il file
                 close(cl_sd); // Chiudo il socket del client
-                pthread_exit(NULL); // Termina il thread
+                pthread_exit(NULL); // Termino il thread
             }
             string_to_lower(risposta_client); // Converto la risposta del client in minuscolo
             c = fgetc(fp); // Leggo il file per scartare lo spazio tra la domanda e le risposte
@@ -957,6 +962,7 @@ int main () {
         perror("Errore nel listen");
         exit(EXIT_FAILURE);
     }
+    signal(SIGPIPE, gestisci_sigpipe); // Gestisco il segnale SIGPIPE per evitare che il server si chiuda in caso di errore di scrittura su un socket chiuso
     len = sizeof(cl_addr);
     pthread_mutex_init(&mutex_albero_giocatori, NULL); // Inizializzo il mutex per la mutua esclusione dell'albero dei giocatori
     ottieni_quiz_disponibili(); // Ottengo dinamicamente i quiz disponibli leggendo dal file "quiz/info.txt"

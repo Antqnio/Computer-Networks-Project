@@ -10,6 +10,7 @@
 #include "include/costanti.h"
 #include "include/stampa_delimitatore.h"
 #include "include/send_recv_all.h"
+#include "include/gestisci_sigpipe.h"
 
 #define SERVER_CHIUSO 1 // Flag per indicare se il server è chiuso
 #define SERVER_APERTO 0 // Flag per indicare se il server è aperto
@@ -18,10 +19,6 @@
 
 const char MESSAGGIO_SERVER_CHIUSO[] = "\nSocket lato server si è chiuso: mostro di nuovo il menù di avvio.\n\n";
 
-void gestisci_sigpipe(int sig) {
-    // Usata per informare il client della chiusura del server
-    (void)sig; // Sopprime il warning per parametro non usato
-}
 
 uint8_t scelta_numerica(int min, int max) {
     // Funzione per leggere una scelta numerica da tastiera
@@ -128,10 +125,11 @@ void ottieni_tema_scelto(const char* temi, uint8_t scelta, char* tema_scelto, si
 
 
 void gestisci_ritorno_recv_send_lato_client(int ret, int sd, const char* msg) {
-    // Funzione per gestire il ritorno di recv lato client
+    // Funzione per gestire il ritorno di recv e send lato client
     if (ret <= 0) {
         close(sd);
         if (ret == 0) {
+            // Usata solo per recv
             printf(MESSAGGIO_SERVER_CHIUSO);
         } else {
             printf("\n");
@@ -224,7 +222,7 @@ int main (int argc, char *argv[]) {
         printf("Porta non valida: deve essere un numero tra 1 e 65535\n");
         exit(EXIT_FAILURE);
     }
-    signal(SIGPIPE, gestisci_sigpipe);
+    signal(SIGPIPE, gestisci_sigpipe); // Gestisco il segnale SIGPIPE per evitare che il client si chiuda in caso di errore di scrittura su un socket chiuso
     while(1) {
         scelta = mostra_menu_iniziale();
         if (scelta == 2) {
@@ -437,10 +435,10 @@ int main (int argc, char *argv[]) {
                         // Ho ottenuto EOF o ho avuto un errore in lettura, quindi esco dal ciclo
                         break;
                     }
-                    // Rimuovi il '\n' finale, se presente
+                    // Rimuovo il '\n' finale, se presente, e termino la stringa
                     risposta_client[strcspn(risposta_client, "\n")] = '\0';
                                     
-                    // Controlla se la risposta è vuota
+                    // Controllo se la risposta è vuota
                     prima_iterazione = 0; // Faccio in modo che venga stampato il messaggio di risposta non valida
                 } while (strlen(risposta_client) == 0);
                 
