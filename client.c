@@ -124,17 +124,25 @@ void ottieni_tema_scelto(const char* temi, uint8_t scelta, char* tema_scelto, si
 }
 
 
-void gestisci_ritorno_recv_send_lato_client(int ret, int sd, const char* msg) {
+void gestisci_ritorno_recv_lato_client(int ret, int sd, const char* msg) {
     // Funzione per gestire il ritorno di recv e send lato client
     if (ret <= 0) {
         close(sd);
         if (ret == 0) {
-            // Usata solo per recv
+            // Il server ha chiuso il socket remoto
             printf(MESSAGGIO_SERVER_CHIUSO);
         } else {
             printf("\n");
             perror(msg);
         }
+    }
+}
+
+void gestisci_ritorno_send_lato_client(int ret, int sd, const char* msg) {
+    if (ret < 0) {
+        close(sd);
+        printf("\n");
+        perror(msg);
     }
 }
 
@@ -271,7 +279,7 @@ int main (int argc, char *argv[]) {
     
             // 1. Invia la lunghezza del nickname (quindi quanti byte il server si aspetta)
             dim = sizeof(lunghezza_nickname_net);
-            ret = send_all(sd, (void*)&lunghezza_nickname_net, dim, gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della lunghezza del nickname al server");
+            ret = send_all(sd, (void*)&lunghezza_nickname_net, dim, gestisci_ritorno_send_lato_client, "Errore nell'invio della lunghezza del nickname al server");
             if (ret == 0 || ret == -1) {
                 // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                 // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -295,7 +303,7 @@ int main (int argc, char *argv[]) {
 
             // 3. Invia il nickname al server
             dim = lunghezza_nickname;
-            ret = send_all(sd, (void*)nickname, dim, gestisci_ritorno_recv_send_lato_client, "Errore nell'invio del nickname al server");
+            ret = send_all(sd, (void*)nickname, dim, gestisci_ritorno_send_lato_client, "Errore nell'invio del nickname al server");
             if (ret == 0 || ret == -1) {
                 // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                 // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -330,7 +338,7 @@ int main (int argc, char *argv[]) {
         printf("\n");
         
         // Adesso ricevo prima il numero di temi
-        ret = recv_all(sd, (void*)&numero_di_temi, sizeof(numero_di_temi), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione del numero di temi");
+        ret = recv_all(sd, (void*)&numero_di_temi, sizeof(numero_di_temi), gestisci_ritorno_recv_lato_client, "Errore nella ricezione del numero di temi");
         if (ret == 0 || ret == -1) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
             continue;
@@ -338,7 +346,7 @@ int main (int argc, char *argv[]) {
         numero_di_temi = ntohl(numero_di_temi); // Converto in formato host
         printf("Numero di temi disponibili: %u\n", numero_di_temi);
         // Ora ricevo la lunghezza del buffer che contiene i temi
-        ret = recv_all(sd, (void*)&dim_temi, sizeof(dim_temi), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della lunghezza del buffer dei temi");
+        ret = recv_all(sd, (void*)&dim_temi, sizeof(dim_temi), gestisci_ritorno_recv_lato_client, "Errore nella ricezione della lunghezza del buffer dei temi");
         if (ret == 0 || ret == -1) {
             stato_server = SERVER_CHIUSO; // Imposto il flag per il server chiuso
             close(sd);
@@ -347,7 +355,7 @@ int main (int argc, char *argv[]) {
         dim_temi = ntohl(dim_temi); // Converto in formato host
         // Ora ricevo i temi (o quiz) come una stringa unica, separati da '\n'.
         memset(temi, 0, sizeof(temi)); // Inizializzo il buffer dei temi
-        ret = recv_all(sd, temi, dim_temi, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dei temi");
+        ret = recv_all(sd, temi, dim_temi, gestisci_ritorno_recv_lato_client, "Errore nella ricezione dei temi");
         // A questo punto, temi contiene tutti i titoli dei temi, separati da '\n'.
         // Ora scelgo un tema e lo invio al server.
         while(1) {
@@ -363,7 +371,7 @@ int main (int argc, char *argv[]) {
                 scelta = scelta_numerica(1, numero_di_temi); // Scelta del tema
                 // Non serve convertire in network order perché è un uint8_t
                 // Invio la scelta del tema al server
-                ret = send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della scelta del tema al server");
+                ret = send_all(sd, (void*)&scelta, sizeof(scelta), gestisci_ritorno_send_lato_client, "Errore nell'invio della scelta del tema al server");
                 if (ret == 0 || ret == -1) {
                     // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                     // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -400,7 +408,7 @@ int main (int argc, char *argv[]) {
                 uint8_t dimensione_risposta_client;
                 uint8_t dimensione_risposta_server;
                 if (domanda_non_ancora_ricevuta) {
-                    ret = recv_all(sd, &dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della domanda dal server");
+                    ret = recv_all(sd, &dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_lato_client, "Errore nella ricezione della dimensione della domanda dal server");
                     if (ret == 0 || ret == -1) {
                         // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                         // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -411,7 +419,7 @@ int main (int argc, char *argv[]) {
                     // printf("Dimensione della domanda: %u\n", dimensione_domanda);
                     // Ricevo una domanda dal server
                     memset(domanda, 0, sizeof(domanda));
-                    ret = recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della domanda dal server");
+                    ret = recv_all(sd, domanda, dimensione_domanda, gestisci_ritorno_recv_lato_client, "Errore nella ricezione della domanda dal server");
                     if (ret == 0 || ret == -1) {
                         // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                         // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -444,7 +452,7 @@ int main (int argc, char *argv[]) {
                 
                 // Invia la dimensione della risposta al server
                 dimensione_risposta_client = strlen(risposta_client);
-                ret = send_all(sd, &dimensione_risposta_client, sizeof(dimensione_risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della dimensione della risposta al server");
+                ret = send_all(sd, &dimensione_risposta_client, sizeof(dimensione_risposta_client), gestisci_ritorno_send_lato_client, "Errore nell'invio della dimensione della risposta al server");
                     if (ret == 0 || ret == -1) {
                     // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                     // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -457,7 +465,7 @@ int main (int argc, char *argv[]) {
                 // la dimensione della risposta come un uint8_t, quindi non può essere > 255 o < 0.
                 // Invia la risposta al server
                 // printf("Risposta inviata: %s\n", risposta_client);
-                ret = send_all(sd, (void*)risposta_client, strlen(risposta_client), gestisci_ritorno_recv_send_lato_client, "Errore nell'invio della risposta al server");
+                ret = send_all(sd, (void*)risposta_client, strlen(risposta_client), gestisci_ritorno_send_lato_client, "Errore nell'invio della risposta al server");
                 if (ret == 0 || ret == -1) {
                     // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                     // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -487,7 +495,7 @@ int main (int argc, char *argv[]) {
                     // Se il client invia "show score", il server invia il punteggio di ogni tema
                     // Ricevo la dimensione della stringa
                     uint32_t dimensione_risposta_server;
-                    ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della risposta del server");
+                    ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_lato_client, "Errore nella ricezione della dimensione della risposta del server");
                     if (ret == 0 || ret == -1) {
                         // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                         // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -498,7 +506,7 @@ int main (int argc, char *argv[]) {
                     dimensione_risposta_server = ntohl(dimensione_risposta_server); // Converto in formato host
                     // Ricevo la risposta del server (il punteggio di ogni tema con relativi nickname)
                     memset(risposta_server, 0, sizeof(risposta_server));
-                    ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della risposta del server");
+                    ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_lato_client, "Errore nella ricezione della risposta del server");
                     if (ret == 0 || ret == -1) {
                         // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                         // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -512,7 +520,7 @@ int main (int argc, char *argv[]) {
                     continue; // Ritorno all'inizio del ciclo per ricevere una nuova domanda
                 }
                 // Ricevo la dimensione della risposta dal server
-                ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione della dimensione della risposta dal server");
+                ret = recv_all(sd, &dimensione_risposta_server, sizeof(dimensione_risposta_server), gestisci_ritorno_recv_lato_client, "Errore nella ricezione della dimensione della risposta dal server");
                 if (ret == 0 || ret == -1) {
                     // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                     // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo
@@ -523,7 +531,7 @@ int main (int argc, char *argv[]) {
                 // printf("Dimensione della risposta del server: %u\n", dimensione_risposta_server);
                 // Ricevo la risposta dal server (contenente l'esito della risposta)
                 memset(risposta_server, 0, sizeof(risposta_server));
-                ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_send_lato_client, "Errore nella ricezione dell'esito della risposta del server");
+                ret = recv_all(sd, (void*)risposta_server, dimensione_risposta_server, gestisci_ritorno_recv_lato_client, "Errore nella ricezione dell'esito della risposta del server");
                 if (ret == 0 || ret == -1) {
                     // Se ret == 0, significa che il socket si è chiuso, quindi esco dal ciclo
                     // Se ret == -1, significa che c'è stato un errore nell'invio, quindi esco dal ciclo

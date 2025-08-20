@@ -355,28 +355,40 @@ void stampa_interfaccia() {
 
 
 
-void gestisci_ritorno_recv_send_lato_server(int ret, int sd, const char* msg) {
+void gestisci_ritorno_recv_lato_server(int ret, int sd, const char* msg) {
     // Funzione per gestire il ritorno di recv
+    // Se il client si è disconnesso o c'è stato un errore di ricezione, cancello il giocatore.
     if (ret <= 0) {
+        // Trovare il giocatore è O(n), però ci si aspetta che le disconnessioni non siano tanto frequenti
+        struct Giocatore* giocatore = trova_giocatore(sd, albero_giocatori);
         if (ret == 0) {
-            printf("Socket %d lato client chiuso.\n", sd);
+            printf("\nIl giocatore %s (socket %d) si e' disconnesso.\n\n", giocatore->nickname, sd);
         } else {
             perror(msg);
         }
         // Chiudo il socket associato al client sia nel caso di errore che di chiusura
         // Elimino il giocatore associato al socket
-        // Trovare il giocatore è O(n), però ci si aspetta che le disconnessioni non siano tanto frequenti
+        elimina_giocatore(giocatore);
+        close(sd);
+        stampa_interfaccia(); // Stampo l'interfaccia dopo la disconnessione
+        pthread_exit(NULL); // Termino il thread
+    }
+}
+
+void gestisci_ritorno_send_lato_server(int ret, int sd, const char* msg) {
+    if (ret < 0) {
+        perror(msg);
         struct Giocatore* giocatore = trova_giocatore(sd, albero_giocatori);
         elimina_giocatore(giocatore);
         close(sd);
-        stampa_interfaccia(); // Stampa l'interfaccia dopo la disconnessione
-        pthread_exit(NULL); // Termina il thread
+        stampa_interfaccia(); // Stampo l'interfaccia dopo la disconnessione
+        pthread_exit(NULL); // Termino il thread
     }
 }
 
 void invia_ack(int sd, uint8_t ack) {
     // Funzione per inviare un ACK al client
-    send_all(sd, (void*)&ack, sizeof(ack), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dell'ACK al client");
+    send_all(sd, (void*)&ack, sizeof(ack), gestisci_ritorno_send_lato_server, "Errore nell'invio dell'ACK al client");
 }
 
 struct Giocatore* crea_giocatore(int cl_sd) {
@@ -387,7 +399,7 @@ struct Giocatore* crea_giocatore(int cl_sd) {
         memset(nickname, 0, sizeof(nickname)); // Inizializza il nickname
         // Ricevi la lunghezza del nickname
         uint32_t lunghezza_nickname = 0;
-        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della lunghezza del nickname");
+        recv_all(cl_sd, &lunghezza_nickname, sizeof(lunghezza_nickname), gestisci_ritorno_recv_lato_server, "Errore nella ricezione della lunghezza del nickname");
         // printf("Lunghezza nickname ricevuta: %d\n", lunghezza_nickname);
         lunghezza_nickname = ntohl(lunghezza_nickname); // Converto in formato host
         // Ricevi il nickname dal client
@@ -399,7 +411,7 @@ struct Giocatore* crea_giocatore(int cl_sd) {
         // Lunghezza valida: informo il client che può inviare il nickname
         invia_ack(cl_sd, 1); // Invia un ACK positivo al client
         // Faccio in modo di ricevere esattamente un numero di byte pari alla lunghezza del nickname
-        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione del nickname");
+        recv_all(cl_sd, nickname, lunghezza_nickname, gestisci_ritorno_recv_lato_server, "Errore nella ricezione del nickname");
         // Controlla se il nickname è valido
         if (nickname_gia_registrato(nickname, albero_giocatori)) {
             // printf("Nickname errato o già registrato: %s\n", nickname);
@@ -442,7 +454,7 @@ void invia_quiz_disponibili(struct Giocatore* giocatore) {
     snprintf(messaggio_di_errore, sizeof(messaggio_di_errore), "Errore nell'invio del numero dei quiz al client %s: ", giocatore->nickname);
     
     // Invia il numero di quiz disponibili al client
-    send_all(giocatore->socket, (void*)&numero_di_quiz_disponibili_net, sizeof(numero_di_quiz_disponibili), gestisci_ritorno_recv_send_lato_server, messaggio_di_errore);
+    send_all(giocatore->socket, (void*)&numero_di_quiz_disponibili_net, sizeof(numero_di_quiz_disponibili), gestisci_ritorno_send_lato_server, messaggio_di_errore);
 
     // Ora invio i temi come una stringa unica il cui separatore è '\n'
     memset(buffer, 0, dim);
@@ -455,10 +467,10 @@ void invia_quiz_disponibili(struct Giocatore* giocatore) {
     // per poi inviarla al client
     dim_temi = strlen(buffer);
     dim_temi_net = htonl(dim_temi); // Converto in formato di rete
-    send_all(giocatore->socket, (void*)&dim_temi_net, sizeof(dim_temi_net), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei temi al client");
+    send_all(giocatore->socket, (void*)&dim_temi_net, sizeof(dim_temi_net), gestisci_ritorno_send_lato_server, "Errore nell'invio della lunghezza del buffer dei temi al client");
 
     // Ora invio il buffer contenente i temi
-    send_all(giocatore->socket, (void*)buffer, dim_temi, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei temi al client");
+    send_all(giocatore->socket, (void*)buffer, dim_temi, gestisci_ritorno_send_lato_server, "Errore nell'invio dei temi al client");
 
 }
 
@@ -488,7 +500,7 @@ uint8_t ricevi_quiz_scelto(struct Giocatore* giocatore) {
     uint8_t ack; // Variabile per gestire l'ACK
     do {
         // Ricevo il quiz scelto dal client
-        recv_all(giocatore->socket, (void*)&quiz_scelto, sizeof(quiz_scelto), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione del quiz scelto dal client");
+        recv_all(giocatore->socket, (void*)&quiz_scelto, sizeof(quiz_scelto), gestisci_ritorno_recv_lato_server, "Errore nella ricezione del quiz scelto dal client");
         if (quiz_scelto < 1 || quiz_scelto > numero_di_quiz_disponibili || quiz_gia_giocato(giocatore, quiz_scelto)) {
             ack = 0; // Il quiz scelto non è valido
             invia_ack(giocatore->socket, ack); // Invia un ACK negativo al client
@@ -678,9 +690,9 @@ void invia_punteggio_di_ogni_tema(int sd) {
     }
     // Invio la lunghezza della stringa al client
     lunghezza_buffer = htonl(strlen(buffer)); // Converto la lunghezza in formato di rete
-    send_all(sd, (void*)&lunghezza_buffer, sizeof(lunghezza_buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della lunghezza del buffer dei punteggi al client");
+    send_all(sd, (void*)&lunghezza_buffer, sizeof(lunghezza_buffer), gestisci_ritorno_send_lato_server, "Errore nell'invio della lunghezza del buffer dei punteggi al client");
     // Invio la stringa al client                  
-    send_all(sd, (void*)buffer, strlen(buffer), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio dei punteggi del tema al client");
+    send_all(sd, (void*)buffer, strlen(buffer), gestisci_ritorno_send_lato_server, "Errore nell'invio dei punteggi del tema al client");
 }
 
 void invia_risposta(int sd, const char* risposta) {
@@ -688,10 +700,10 @@ void invia_risposta(int sd, const char* risposta) {
     // Invio la lunghezza della risposta al client (sta in un uint8_t)
     uint8_t dimensione_risposta = strlen(risposta);
     // printf("Invio della dimensione della risposta: %d\n", dimensione_risposta);
-    send_all(sd, (void*)&dimensione_risposta, sizeof(dimensione_risposta), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della dimensione della risposta al client");
+    send_all(sd, (void*)&dimensione_risposta, sizeof(dimensione_risposta), gestisci_ritorno_send_lato_server, "Errore nell'invio della dimensione della risposta al client");
     // Invia la risposta al client
     // printf("Invio della risposta al client: %s\n", risposta);
-    send_all(sd, (void*)risposta, dimensione_risposta, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della risposta del server al client");
+    send_all(sd, (void*)risposta, dimensione_risposta, gestisci_ritorno_send_lato_server, "Errore nell'invio della risposta del server al client");
     
 }
 
@@ -765,17 +777,17 @@ void* gestisci_connessione(void* arg) {
                 // Invio la lunghezza della domanda al client
                 // printf("Dimensione della domanda: %d\n", i);
                 dimensione_domanda = i; // La dimensione della domanda è pari al numero di caratteri letti
-                send_all(cl_sd, (void*)&dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della dimensione della domanda al client");
+                send_all(cl_sd, (void*)&dimensione_domanda, sizeof(dimensione_domanda), gestisci_ritorno_send_lato_server, "Errore nell'invio della dimensione della domanda al client");
                 // Invio la domanda al client
                 printf("Invio domanda al client %s: %s\n", giocatore->nickname, domanda);
-                send_all(cl_sd, (void*)domanda, i, gestisci_ritorno_recv_send_lato_server, "Errore nell'invio della domanda al client");
+                send_all(cl_sd, (void*)domanda, i, gestisci_ritorno_send_lato_server, "Errore nell'invio della domanda al client");
             }
             // Ricevo la dimensione della risposta dal client (tale dimensione è un uint8_t)
-            recv_all(cl_sd, &dimensione_risposta, sizeof(dimensione_risposta), gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della dimensione della risposta dal client");
+            recv_all(cl_sd, &dimensione_risposta, sizeof(dimensione_risposta), gestisci_ritorno_recv_lato_server, "Errore nella ricezione della dimensione della risposta dal client");
             // printf("Dimensione della risposta: %d\n", dimensione_risposta);
             // Ricevo la risposta del client
             memset(risposta_client, 0, sizeof(risposta_client)); // Inizializzo il buffer della risposta
-            recv_all(cl_sd, (void*)risposta_client, dimensione_risposta, gestisci_ritorno_recv_send_lato_server, "Errore nella ricezione della risposta dal client");
+            recv_all(cl_sd, (void*)risposta_client, dimensione_risposta, gestisci_ritorno_recv_lato_server, "Errore nella ricezione della risposta dal client");
             // printf("Ricevuta risposta dal client %s: %s\n", giocatore->nickname, risposta_client);
             if (strcmp(risposta_client, "show score") == 0) {
                 invia_punteggio_di_ogni_tema(cl_sd);

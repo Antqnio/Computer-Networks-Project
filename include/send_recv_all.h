@@ -6,7 +6,7 @@
 
 /**
  * Legge esattamente len byte dal socket sock.
- * Ritorna il numero di byte letti o -1 su errore.
+ * Ritorna il numero di byte letti, 0 se il socket remoto si è chiuso o -1 su errore.
  */
 ssize_t recv_all(int sock, void *buf, size_t len, void (*gestisci_ritorno_recv)(int, int, const char*), const char* errore_msg);
 
