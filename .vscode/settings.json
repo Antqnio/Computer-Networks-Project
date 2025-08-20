@@ -4,6 +4,8 @@
         "inet.h": "c",
         "stampa_delimitatore.h": "c",
         "constants.h": "c",
-        "send_recv_all.h": "c"
+        "send_recv_all.h": "c",
+        "types.h": "c",
+        "socket.h": "c"
     }
 }

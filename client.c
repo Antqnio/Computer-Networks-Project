@@ -8,7 +8,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include "include/costanti.h"
-#include "include/comandi.h"
 #include "include/stampa_delimitatore.h"
 #include "include/send_recv_all.h"
 

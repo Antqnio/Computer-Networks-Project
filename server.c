@@ -10,7 +10,6 @@
 #include <ctype.h>
 #include "include/costanti.h"
 #include "include/stampa_delimitatore.h"
-#include "include/comandi.h"
 #include "include/send_recv_all.h"
 
 
